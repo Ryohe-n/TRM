@@ -7,14 +7,17 @@ Image Signal Processor (ISP)
 **Figure 7.25 Top-Level ISP Block Diagram**
 #### 7.2.4.2 Frontend
 The Front-End (FE) unit of the ISP interfaces with Host1x, includes a Falcon microcontroller, and coordinates context switching and error handling.
+![Rendered page 2](assets/page_0002_render.png)
 
 Image Signal Processor (ISP)
 **Figure 7.26 Frontend Block Diagram**
+![Rendered page 3](assets/page_0003_render.png)
 
 Image Signal Processor (ISP)
 **Figure 7.27 Falcon Safety Block Diagram**
 #### 7.2.4.3 Pixel Reconstruction Unit
 The Pixel Reconstruction Unit (PRU) can support fusing the output of multiexposure HDR sensors into a single image. The PRU has the following operations: Optical black level correction of multiple Bayer domain exposures White balance correction across multiple Bayer domain exposures Fusion of multiple Bayer domain exposures to a single HDR (HDR) Bayer image Correction of defective pixels and outliers The data flow diagram of HDR fusion in the PRU is shown below.
+![Rendered page 4](assets/page_0004_render.png)
 
 Image Signal Processor (ISP)
 **Figure 7.28 Pixel Reconstruction Unit Data Flow Diagram**
@@ -23,17 +26,20 @@ The HDR fusion is done on a per-pixel basis across multiple (up to three) exposu
 The PRU is designed to provide the HDR fusion and defective pixel correction functionality for all anticipated use cases targeted by the ISP. The use cases include: Automotive HDR image and video capture using HDR sensors Mobile and embedded image and video capture using non-HDR sensors Machine-vision processing pipelines Human-visual processing pipelines
 #### 7.2.4.4 Affine Transform
 There are three Affine Transform (AT) units and each can perform a set of linear operations on pixels. See also the Transfer Function (TF) unit, which performs a set of nonlinear operations in a similar manner. Typical AT operations: Black level adjustment White balance Color space conversion (CSC) Color correction matrix
+![Rendered page 5](assets/page_0005_render.png)
 
 Image Signal Processor (ISP) The AT unit can operate on Bayer data, or RGB or YUV data. The AT unit also supports an optional fourth component called Auxiliary or Alpha. This is true on both input and output. When Auxiliary data are present on the RGB/YUV datapath, the pixel bus is referred to as RGBA or YUVA. The Auxiliary component can also be used with Bayer data, in which it is separated into four different subtypes of Auxiliary components based on the Bayer phase. The Auxiliary component of the TL pixels is referred to as ATL. Similarly, that of the TR pixels are ATR, that of the BL pixels are ABL, and that of the BR pixels are ABR. Note that AT is one of the few units that can generate an Auxiliary component on the output when none is present on the input because all the components can influence each other. As shown in the following top-level block diagram, the AT unit can be placed anywhere in the crossbar. It operates on Bayer or RGB/YUV data. If the input data is Bayer, its output data is always Bayer. If the input data is RGB/YUV, its output data is also RGB/YUV. For RGB/YUV operations, the output type is the same as the input type, because AT can perform CSC between RGB and YUV. One of the common uses of AT is to convert RGB data to YUV data.
 **Figure 7.30 Affine Transform Top-Level Block Diagram**
 #### 7.2.4.5 Lens Shader
 The Lens Shader (LS) unit is intended to compensate for vignetting, which is a reduction of image brightness at the periphery compared to the image center. There are many types of vignetting: natural vignetting, optical vignetting, pixel/sensor/mechanical vignetting, and so on. While some of these affect light with different wavelengths with similar magnitude and phase, most do not. Consequently, the vignetting or lens shading effect is sometimes different for different color pixels. For example, the lens-shading surface for Red (Red pixels in Bayer data, or Red channel in RGB data) is different from that of Green and Blue. Luminance Shading is lens shading that is the same for all color pixels. To correct the Luminance Shading, only one lens-shading correction surface is needed for all four Bayer pixels of Bayer data, one surface for all three channels of RGB data, and one surface that applies to Y of YUV data. Color/Chroma Shading is lens shading that is different for different colors. To compensate for Color/Chroma Shading, four correction surfaces for Bayer data are needed, three surfaces for RGB data, and two surfaces that apply to U and V of YUV data. The LS unit consists of two different LS subunits. The first one is a rectangular grid-based method that uses Bezier patches to model the lens-shading surfaces using the Cartesian coordinate system, while the second subunit is a radial-based method that models the surfaces using the polar coordinate system. Both Bezier LS and Radial LS have the storage for four LS surfaces, and therefore can correct both Color/Chroma Shading and Luminance Shading. While the Bezier LS can
+![Rendered page 6](assets/page_0006_render.png)
 
 Image Signal Processor (ISP) theoretically correct all LS effects without the Radial LS, the Radial LS might perform the full LS correction poorly by itself on certain sensors. sSome of the LS effects such as those caused by the sensor micro-lenses and the pixel/sensor/mechanical designs might not be radial. It is recommended that the Radial LS be used to correct the Luminance Shading or the cosine fourth falloff, and the Bezier LS be used to correct the residues. As shown in the following top-level block diagram, the LS unit can be placed anywhere in the crossbar. It operates on Bayer or RGB/YUV data and outputs the data in the same type as the input.
 **Figure 7.31 Lens Shading Top-Level Block Diagram**
 #### 7.2.4.6 Area Processor
 The Area Processor (AP) subunit of the ISP handles three key functions: Demosaic, Noise Reduction, and Local Tone Mapping. The AP supports the following key features: Simultaneous CV + HV output Four independent 9x9 demosaic kernels Demosaic Bypass Chroma Artifact Removal Chroma Desaturation Noise Reduction (NRNLM) Local Tone Mapping (LTM) Detail Enhancement Output 4x4 Matrix
 **Figure 7.32 Area Processor Subsystem**
+![Rendered page 7](assets/page_0007_render.png)
 
 Image Signal Processor (ISP)
 ##### 7.2.4.6.1 Demosaic
@@ -45,6 +51,7 @@ The Local Tone-Mapping (LTM) unit can reduce the dynamic range of HDR images in 
 
 Image Signal Processor (ISP) been made to allow camera sensors to capture data with a HDR. However, there remains a challenge to store and display such HDR content. Chief among these challenges is the ability to maintain local relative contrast in the displayed image. A naïve approach to displaying the HDR content would be to map the linear input data from the camera sensor to display pixel levels in such a way that attaches equal importance to every brightness level. After all, the human visual system exhibits a roughly logarithmic sensitivity to light levels. However, such an approach would render the scene as visually “flat,” completely lacking the local contrast that is so desirable. Such mappings are termed Global Tone Mapping. A better approach is to map regions of similar tone together, preserving their relative tonal contrast relationships. In other words, light and dark areas within a generally well-lit region would preserve their property of being light and dark. Similar contrast relationships in dark shadow areas would also be preserved. Moreover, it is possible that dark areas in brightly lit parts of the scene may end up being darker than bright areas in shadow regions in the final output image. Even though the former may have had a sensor that output value orders of magnitude brighter than the latter. This kind of local contrast-preserving tone mapping is termed Local Tone Mapping. This is the task for which this unit is designed.
 **Figure 7.33 Context Block Diagram Showing Connections to Other Units Within the ISP**
+![Rendered page 9](assets/page_0009_render.png)
 
 Image Signal Processor (ISP) The shaded blocks show the extent of the LTM unit, which is split into Part A and Part B. Part A is physically located in the NR partition of the Areal Processor, and Part B is located in the LTM partition. Pixel data will enter on the left from the NLM Noise Reduction block and from the CSC/CCM block. The LTM uses the line delay elements in the NRNLM unit to allow it to process image areas. Within the LTM there are three main functional blocks: tone key generator, global tone statistics generator, and pixel value modification block. The modified pixel values exit the right side, along with statistics about the image tone. The LTM is designed to enable software to control the mapping of input image tonal values to output tonal values, while simultaneously maintaining local contrast and color saturation. This is achieved by programming the hardware registers that control the LTM. In order to aid the programming software in the task of assigning values to these registers, statistics about the tonal content of the image is provided by the LTM hardware. This statistical information can be analyzed to provide information such as black points, white points, and general tonal distribution. This may influence the programming of the various transfer functions, which ultimately control the output image tone, contrast, and color saturation. It should be noted that since the statistics information may require an entire frame time to accumulate, there may be a one-frame latency between the arrival of a frame and the correct application of the programmed values to the following frame of data. Care should be taken that this does not result in significant visual artifacts when the tonal content is rapidly changing. For example, it is suggested that the significance of the soft tone key is reduced when it is detected that the scene-tonal content is rapidly changing. This may reduce local contrast, but it is more desirable than the large swings in the perceived tone. This can result from the one-frame delay in application of the average tone information in the form of the soft tone key.
 #### 7.2.4.7 Down scaler
@@ -55,12 +62,14 @@ Image Signal Processor (ISP)
 Each scaler consists of an IIR filter implementing a second-order Butterworth filter. Final output resampling for the horizontal scaler uses a linear interpolator to blend between adjacent outputs of the filter.
 **Figure 7.35 Downscaler Block Diagram**
 The block diagram above shows the two halves of the down scaler which is the Horizontal Scaler and the Vertical Scaler. It also shows how these are connected to the crossbar, and either a SHARP subunit or an Auto-Focus Metric (AFM) subunit, dependent on which down scaler is being considered. The crossbar is used to connect the down scaler to other subunits within the ISP. In the ISP, there are three-horizontal/vertical scaler pairs (each pair is referred to simply as a DS), to allow the scaling of three images independently. These scalers are referred to as DS0, DS1, and DS2. DS0 and DS1 connect to one SHARP subunit each and DS2 connects to an AFM subunit. The reason for the asymmetry is that DS2 will generate a thumbnail image to be used exclusively for this purpose, in addition to providing a reduced resolution input image for the AFM. Since the AFM
+![Rendered page 11](assets/page_0011_render.png)
 
 Image Signal Processor (ISP) cannot operate on large images and these large images are likely to be user visible (and hence may need image quality enhancement in the form of sharpening), the SHARP subunits are attached to DS0 and DS1 only.
 #### 7.2.4.8 Sharp
 The SHARP functional unit is a subunit within the Image Signal Processor (ISP). Following all the processing steps and scaling to the correct output resolution, it may be required to enhance the perceived visual quality of the output image by increasing contrast along object edges. This gives the impression of a sharper, and clearer image. The method used in the SHARP subunit is an Un-Sharp Mask (USM) algorithm. There are two SHARP subunits. Each one is connected to the output of one of the three Down Scaler (DS) subunits. Note that one of the DS subunits does not have a SHARP subunit attached, but has the AFM subunit attached instead. These connections are fixed. The outputs of the two SHARP subunits connect to the Crossbar subunit. Since the inputs of the associated DS subunits are also connected to the Crossbar subunit, each of the two DS-SHARP pairs can be independently connected to any other subunit in the ISP that is also connected to the Crossbar.
 **Figure 7.36 Sharp Function Block Diagram**
 The diagram above shows the general layout of the SHARP subunit. Pixel data enters from the left, is first filtered vertically, to produce the low-pass filtered signal GV, then low pass filtered horizontally with the Horizontal Filter to produce the final low-pass filtered signal G. This signal, along with a delayed version of the input, L1, is passed to the Un-Sharp Mask (USM) block, where most of the actual sharpening operation takes place. Note that the block diagram applies to each of the three input color components. This triplication has not been shown for clarity.
+![Rendered page 12](assets/page_0012_render.png)
 
 Image Signal Processor (ISP)
 #### 7.2.4.9 Transfer Function
@@ -68,17 +77,20 @@ There are two Transfer Function (TF) units, which each performs a set of nonline
 **Figure 7.37 Transfer Function Top-Level Block Diagram**
 #### 7.2.4.10 Local Average and Clip
 The Local Average and Clip (LAC) unit creates local averages of the pixel values within a small rectangle of the image. Many such rectangles are arranged across the image effectively giving a low-resolution version of the image to allow software algorithms to determine various parameters of the image. The LAC unit has the capability to use clipping to exclude pixels that are too dark or too bright from the average by defining a range to be used for the average calculation. This allows, for
+![Rendered page 13](assets/page_0013_render.png)
 
 Image Signal Processor (ISP) example, totally saturated pixels from over-exposure to be excluded from the average. The LAC will report the number of clipped pixels. The ISP supports analysis of up to four regions of interest (ROIs) in the image. Each ROI supports a maximum of 32x32 LAC windows. The size of the ROIs is programmable and they are allowed to overlap. The ISP also supports an elliptical mask to be programmed to support a fisheye lens, with programmable center position, major and minor axis, and tilt angle of the ellipse. Any pixels outside the ellipse are excluded from the analysis and their count is reported. As shown in the following top-level block diagram, the LAC unit can be placed anywhere in the crossbar. It produces the LAC statistics from Bayer or RGB/YUV data, while leaving the data completely unchanged.
 **Figure 7.38 LAC Top-Level Block Diagram**
 #### 7.2.4.11 Histogram
 Histogram (H) is a representation of the tonal distribution in the image. It plots the number of pixels for each tonal value. Histogram provides very useful statistics that can be used in many algorithms such as Auto Exposure, Auto White Balance, and Tone Mapping. The histogram output has 256 bins per histogram. The bin width and center points are flexible and can be assigned to linear or logarithmic bin sizes and widths.
+![Rendered page 14](assets/page_0014_render.png)
 
 Image Signal Processor (ISP)
 **Figure 7.39 Histogram High-Level Block Diagram**
 #### 7.2.4.12 Flicker Band
 The alternating current (AC) is the most popular way in which electric power is delivered to businesses and residences. Some artificial lights such as fluorescent lamps that are powered by AC will flicker when their supply current reverses direction. This flickering is invisible to people, but is picked up on cameras equipped with rolling shutter sensors. The images produced by such cameras exhibit horizontal bandings that alternate between darker and lighter rows. The Flicker Band (FB) unit segments the image into horizontal bands, then computes and returns the average brightness of each band as FB statistics. The software analyzes the FB statistics to detect and correct the flickering. As shown in the following top-level block diagram, the FB unit can be placed anywhere in the crossbar. It produces the FB statistics from Bayer or RGB/YUV data, while leaving the data completely unchanged.
 **Figure 7.40 Flicker Band Top-Level Block Diagram**
+![Rendered page 15](assets/page_0015_render.png)
 
 Image Signal Processor (ISP)
 #### 7.2.4.13 DMX
@@ -89,3 +101,4 @@ Display Control Engine (DCE)
 ### 7.2.5 Display Control Engine (DCE)
 #### 7.2.5.1 Overview
 The Display Control Engine (DCE) is a general-purpose computing subsystem based on an ARM® Cortex® -R5F used to perform display controller management tasks. The DCE is a duplicate instance of the Safety Cluster Engine (SCE) module; internally both SCE and DCE are the same, however, some I/O connections are different. The processing cluster consists of two Cortex-R5F processor cores with a tightly coupled RAM, support peripherals (for example, timers, interrupt
+![Rendered page 17](assets/page_0017_render.png)
