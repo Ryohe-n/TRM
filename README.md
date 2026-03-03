@@ -1,5 +1,3 @@
-<!-- Page 1 -->
-
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
 ###### Image Signal Processor (ISP)
@@ -51,9 +49,6 @@ functional safety features are Supported.
 ```
 </details>
 
-
-<!-- Page 2 -->
-
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
 ###### Image Signal Processor (ISP)
@@ -91,9 +86,6 @@ RS)
 ```
 </details>
 
-
-<!-- Page 3 -->
-
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
 ###### Image Signal Processor (ISP)
@@ -119,9 +111,6 @@ we NVIDIA Orin Series System-on-Chip DP-10508-001_v1.2 | Page 5119
 
 ```
 </details>
-
-
-<!-- Page 4 -->
 
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
@@ -166,9 +155,6 @@ e) NVIDIA Orin Series System-on-Chip DP-10508-001_v1.2 | Page 5120
 
 ```
 </details>
-
-
-<!-- Page 5 -->
 
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
@@ -235,9 +221,6 @@ Typical AT operations:
 
 ```
 </details>
-
-
-<!-- Page 6 -->
 
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
@@ -311,9 +294,6 @@ therefore can correct both Color/Chroma Shading and Luminance Shading. While the
 ```
 </details>
 
-
-<!-- Page 7 -->
-
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
 ###### Image Signal Processor (ISP)
@@ -377,9 +357,6 @@ YW Vyopsce
 
 ```
 </details>
-
-
-<!-- Page 8 -->
 
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
@@ -455,9 +432,6 @@ and-display scenes that have the kinds of extreme lighting described above. Rece
 ```
 </details>
 
-
-<!-- Page 9 -->
-
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
 ###### Image Signal Processor (ISP)
@@ -514,9 +488,6 @@ PrinfaryOutput (YUV) csc/CCM 1
 
 ```
 </details>
-
-
-<!-- Page 10 -->
 
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
@@ -577,9 +548,6 @@ elements.
 
 ```
 </details>
-
-
-<!-- Page 11 -->
 
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
@@ -648,9 +616,6 @@ this purpose, in addition to providing a reduced resolution input image for the 
 ```
 </details>
 
-
-<!-- Page 12 -->
-
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
 ###### Image Signal Processor (ISP)
@@ -710,9 +675,6 @@ ofthe three input color components. This triplication has not been shown for cla
 
 ```
 </details>
-
-
-<!-- Page 13 -->
 
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
@@ -785,9 +747,6 @@ from-the average by defining a range to be used for the average calculation. Thi
 ```
 </details>
 
-
-<!-- Page 14 -->
-
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
 ###### Image Signal Processor (ISP)
@@ -839,9 +798,6 @@ can be assigned to linear or logarithmic bin sizes and widths.
 
 ```
 </details>
-
-
-<!-- Page 15 -->
 
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
@@ -898,9 +854,6 @@ FB Statistics
 ```
 </details>
 
-
-<!-- Page 16 -->
-
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
 ###### Image Signal Processor (ISP)
@@ -950,9 +903,6 @@ wide variety of different sensor types, including many with nonideal characteris
 
 ```
 </details>
-
-
-<!-- Page 17 -->
 
 Hideyuki Sugiura NVIDIA Confidential Denso-BEVS3-ADC 1072259 2025-02-09 17:40:27
 
