@@ -1,6 +1,0 @@
-﻿# 0 - 7 none
-
-- DCE - TKE
-nPMUIRQ0
-- NV_DCE_INTERRUPT_PMU
-

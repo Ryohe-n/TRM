@@ -1,4 +1,0 @@
-﻿# 1 = ENABLE 0 = DISABLE 0x0 SW_RESET0_A:
-
-- SOFT RESET FOR LANE A0. Active High
-

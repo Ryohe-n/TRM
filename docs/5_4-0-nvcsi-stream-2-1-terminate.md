@@ -1,4 +1,0 @@
-﻿# 5 :4 0: NVCSI stream 2 1: TERMINATE
-
-- STREAM3
-

@@ -1,4 +1,0 @@
-﻿# 13 :8 0x0 DTYPE:
-
-- Or FE_ERROR
-

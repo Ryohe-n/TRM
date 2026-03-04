@@ -1,6 +1,0 @@
-﻿# 0 = NOT_FULL 1 = FULL
-
-- RO
-0x1 RX_FIFO_EMPTY:
-- RX FIFO Empty
-

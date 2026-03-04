@@ -1,4 +1,0 @@
-﻿# 0 = DISABLED 1 = ALARM_A 2 = ALARM_B 3 = ALARM_C 17:16 0x0 BBC_STS_1000:
-
-- Mapping of BBC 1000->OC Alarm
-

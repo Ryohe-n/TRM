@@ -1,4 +1,0 @@
-﻿# 0 = OFF 1 = ON 0x0
-
-- IGNORE_MASTER_CFG
-
