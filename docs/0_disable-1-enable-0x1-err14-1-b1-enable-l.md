@@ -1,4 +1,0 @@
-﻿# 0 = DISABLE 1 = ENABLE 0x1 ERR14: 1'b1 -> Enable Latent Error Reporting for Register Parity Error from NV_vi.u_pixfmt.u_cfgreg 1'b0 -> Disable Latent Error Reporting for Register Parity Error from NV_vi.u_pixfmt.u_cfgreg 0 = DISABLE 1 = ENABLE 0x1 ERR13: 1'b1 -> Enable Latent Error Reporting for Register Parity Error from NV_vi.u_pixfmt.u_reg 1'b0 -> Disable Latent Error Reporting for Register Parity Error from NV_vi.u_pixfmt.u_reg 0 = DISABLE 1 = ENABLE 0x1 ERR12: 1'b1 -> Enable Latent Error Reporting for Register Parity Error from NV_vi.u_csbmaster.u_chanreg 1'b0 -> Disable Latent Error Reporting for Register Parity Error from NV_vi.u_csbmaster.u_chanreg 0 = DISABLE 1 = ENABLE 0x1 ERR11: 1'b1 -> Enable Latent Error Reporting for Other Uncorrected Error from
-
-- FAULT_UDF_TAG_VI_FATAL_NOTIFY_TIMESTAMP_OVRFLOW_ERR
-

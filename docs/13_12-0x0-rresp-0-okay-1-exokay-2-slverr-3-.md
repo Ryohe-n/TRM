@@ -1,4 +1,0 @@
-﻿# 13 :12 0x0 RRESP: 0 = OKAY 1 = EXOKAY 2 = SLVERR 3 = DECERR 9:4 0x0
-
-- BID
-

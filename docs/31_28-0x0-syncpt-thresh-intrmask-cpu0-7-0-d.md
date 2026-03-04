@@ -1,8 +1,0 @@
-﻿# 31 :28 0x0 SYNCPT_THRESH_INTRMASK_CPU0_7: 0 = DISABLE 1 = ENABLE 27:24 0x0 SYNCPT_THRESH_INTRMASK_CPU0_6: 0 = DISABLE 1 = ENABLE
-
-
-- Host Controller Registers
-- Bit
-- Reset
-- Description
-
