@@ -1,0 +1,86 @@
+﻿# 31 :24 0x0 REQCOUNT: 0 = INIT 23:0 0x0 SIZE: 0 = INIT T_XUSB_DEV_XHCI_BLCG_0
+
+- Clock gating control status register
+- Offset: 0x840
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00007ffd (0bx000,0000,0000,00x0,x111,1111,1111,11x1)
+- PROD: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxx0,xxxx,xxxx)
+
+- USB 3.0 Device Controller Memory-Mapped I/O Registers
+- Bit
+- Reset
+- Description
+0x0 OVRD_SS_PI_500M: 0 = DISABLED 1 = ENABLED 0x0 OVRD_SS_PI: 0 = DISABLED 1 = ENABLED 0x0 OVRD_IOPLL_3_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 OVRD_IOPLL_2_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 OVRD_IOPLL_1_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 OVRD_IOPLL_0_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 OVRD_COREPLL_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 OVRD_NVWRAP_48M: 0 = DISABLED 1 = ENABLED 0x0 OVRD_NVWRAP_480M: 0 = DISABLED 1 = ENABLED 0x0 OVRD_HSFS_PI: 0 = DISABLED 1 = ENABLED 0x0 OVRD_PICLK_BI: 0 = DISABLED 1 = ENABLED 0x0 OVRD_CORE_BI: 0 = DISABLED 1 = ENABLED 0x0 OVRD_FE: 0 = DISABLED 1 = ENABLED 0x0 OVRD_AXIAPB: 0 = DISABLED 1 = ENABLED 0x1 SS_PI_500M: 0 = DISABLED 1 = ENABLED
+
+- USB 3.0 Device Controller Memory-Mapped I/O Registers
+- Bit
+- Reset
+- Description
+0x1 SS_PI: 0 = DISABLED 1 = ENABLED 0x1 IOPLL_3_PWRDN: 0 = DISABLED 1 = ENABLED 0x1 IOPLL_2_PWRDN: 0 = DISABLED 1 = ENABLED 0x1 IOPLL_1_PWRDN: 0 = DISABLED 1 = ENABLED 0x1 IOPLL_0_PWRDN: 0 = DISABLED 1 = ENABLED 0x1 COREPLL_PWRDN: 0 = DISABLED 1 = ENABLED 0x1 NVWRAP_48M: 0 = DISABLED 1 = ENABLED 0x1 NVWRAP_480M: 0 = DISABLED 1 = ENABLED 0x1 HSFS_PI: 0 = DISABLED 1 = ENABLED 0x1 PICLK_BI: 0 = DISABLED 1 = ENABLED 0x1 CORE_BI: 0 = DISABLED 1 = ENABLED 0x1 FE: 0 = DISABLED 1 = ENABLED 0x1 AXIAPB: 0 = DISABLED 1 = ENABLED T_XUSB_DEV_XHCI_BLCG_STS_0
+- Offset: 0x844
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+
+- USB 3.0 Device Controller Memory-Mapped I/O Registers
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,x000,0000,0000,0xxx)
+- Bit
+- Reset
+- Description
+0x0 SS_PI_500M: 0 = DISABLED 1 = ENABLED 0x0 SS_PI: 0 = DISABLED 1 = ENABLED 0x0 IOPLL_3_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 IOPLL_2_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 IOPLL_1_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 IOPLL_0_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 COREPLL_PWRDN: 0 = DISABLED 1 = ENABLED 0x0 NVWRAP_48M: 0 = DISABLED 1 = ENABLED 0x0 NVWRAP_480M: 0 = DISABLED 1 = ENABLED 0x0 HSFS_PI: 0 = DISABLED 1 = ENABLED 0x0 PICLK_BI: 0 = DISABLED 1 = ENABLED 0x0 CORE_BI: 0 = DISABLED 1 = ENABLED T_XUSB_DEV_XHCI_BLCG_INTR_0
+- Offset: 0x848
+- Read/Write: See table below
+- Parity Protection: N
+- Shadow: N
+
+- USB 3.0 Device Controller Memory-Mapped I/O Registers
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxx0,0000,xxxx,xxxx,xxx0,0000,xxxx,xxx0)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 STS_IOPLL_3_PWRDN: 0 = DISABLED 1 = ENABLED
+- RO
+0x0 STS_IOPLL_2_PWRDN: 0 = DISABLED 1 = ENABLED
+- RO
+0x0 STS_IOPLL_1_PWRDN: 0 = DISABLED 1 = ENABLED
+- RO
+0x0 STS_IOPLL_0_PWRDN: 0 = DISABLED 1 = ENABLED
+- RO
+0x0 STS_COREPLL_PWRDN: 0 = DISABLED 1 = ENABLED
+- RW
+0x0 IOPLL_3_PWRDN: 0 = DISABLED 1 = ENABLED
+- RW
+0x0 IOPLL_2_PWRDN: 0 = DISABLED 1 = ENABLED
+- RW
+0x0 IOPLL_1_PWRDN: 0 = DISABLED 1 = ENABLED
+- RW
+0x0 IOPLL_0_PWRDN: 0 = DISABLED 1 = ENABLED
+- RW
+0x0 COREPLL_PWRDN: 0 = DISABLED 1 = ENABLED
+- RW
+0x0 TGT: 0 = SMI 1 = PME T_XUSB_DEV_XHCI_CFG_DEVBI_0
+- Offset: 0x850
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x3026b8c3 (0bx011,0000,0010,0110,1011,1xx0,1100,0011)
+
+- USB 3.0 Device Controller Memory-Mapped I/O Registers
+- Bit
+- Reset
+- Description
+0x0 OVERRUN_EVT_DEQPTR0: 0 = INIT 0x1
+- ISOCH_SKIP_SIA: If there is no host request for an EP which has TD
+pending with SIA=1, BI will generate a missed service if this configuration is 1. 1 = INIT 28:24 0x10
+- DMA_RD_MAX_ALOM: Controls the number of back to back accesses
+that DMA Engines issue with ALOM bit (At-Least One More) set 16 = INIT 23:16 0x26
+- CNT_250NS: 250NS counter duration for Interrupt Moderation
+

@@ -1,0 +1,6 @@
+﻿# 0 = DISABLED 1 = ENABLED 19:17
+
+- RW
+0x0 PIN_OUTPUT_SELECT_VGP6:
+- Pin Output Select VGP6
+

@@ -1,0 +1,6 @@
+﻿# 0 = NOP 1 = FLUSH
+
+- RO
+0x1 DMA_FIFO_EMPTY:
+- DMA FIFO Empty
+

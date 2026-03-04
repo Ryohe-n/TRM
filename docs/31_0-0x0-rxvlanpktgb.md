@@ -1,0 +1,17 @@
+﻿# 31 :0 0x0 RXVLANPKTGB:
+
+- Rx VLAN Packets Good Bad This field indicates the number of good
+and bad VLAN packets received.
+- EQOS_EQOS_MAC_RX_WATCHDOG_ERROR_PACKETS_0
+
+1G Ethernet Controller Core Registers This register provides the number of packets received by DWC_ether_qos with error because of watchdog timeout error (packets with a data load larger than 2,048 bytes (when JE and WD bits are reset in MAC_Configuration register), 10,240 bytes (when JE bit is set and WD bit is reset in MAC_Configuration register), 16,384 bytes (when WD bit is set in MAC_Configuration register) or the value programmed in the MAC_WD_JB_Timeout register).
+- Offset: 0x7dc
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+

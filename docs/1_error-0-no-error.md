@@ -1,0 +1,41 @@
+﻿# 1 Error 0 No Error
+
+- Offset: 0x3c
+- Read/Write: See table below
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,00x0,0000,0000,xxxx,xxxx,0x00,0000)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 PRESET_VALUE_ENABLE: 0 = HW_SEL 1 = SW_SEL
+- RW
+0x0 ASYNC_INTR_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 ADDRESSING_64BIT_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 HOST_VERSION_4_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 CMD23_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 ADMA2_LEN_MODE: 0 = LEN_16BIT 1 = LEN_26BIT
+- RW
+0x0 UHS2_IF_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 SAMPLING_CLK_SEL: 0 = FIXED 1 = TUNED
+- RW
+0x0 EXECUTE_TUNING: 0 = NOT_TUNED 1 = EXECUTE 21:20
+- RW
+0x0 DRIVE_STRENGTH_SEL: 0 = TYPE_B 1 = TYPE_A 2 = TYPE_C 3 = TYPE_D
+- RW
+0x0 VOLT_18_EN: 0 = V33 1 = V18
+
+- SDMMCAB Registers
+- Bit
+R/W
+- Reset
+- Description
+

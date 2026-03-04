@@ -1,0 +1,6 @@
+﻿# 0 = NOT_EMPTY 1 = EMPTY
+
+- RW
+0x0 DMA_FIFO_OVF:
+- DMA FIFO Overrun
+

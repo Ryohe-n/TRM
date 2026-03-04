@@ -1,0 +1,16 @@
+﻿# 7 :4 0x0 SYNCPT_THRESH_INTRENABLE_CPU0_1: 0 = NO_CHANGE 1 = ENABLE_CPU0 3:0 0x0 SYNCPT_THRESH_INTRENABLE_CPU0_0: 0 = NO_CHANGE 1 = ENABLE_CPU0
+
+- HOST1X_THOST_COMMON_SYNCPT_THRESH_INTRSTATUS_CPU1_0
+This is an array of 32 identical register entries; the register fields below apply to each entry.
+- Full register list is: HOST1X_THOST_COMMON_SYNCPT_THRESH_INTRSTATUS_CPU1_<i>, among
+which <i> belongs to <0..31>.
+- Offset: 0x264,..,0x2e0
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+

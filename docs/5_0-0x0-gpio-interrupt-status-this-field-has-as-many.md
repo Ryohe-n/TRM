@@ -1,0 +1,105 @@
+﻿# 5 :0 0x0 GPIO_INTERRUPT_STATUS: This field has as many bits as the number of GPIO Pins in the given GPIO Port, with each such bit indicating whether the corresponding GPIO Input change has resulted in Interrupt.
+
+- Bit 0 is for Pin 0,
+- Bit 1 is for Pin 1,
+... Bit <j> is for Pin <j>. 0 = Interrupt not set. 1 = Interrupt set.
+- It is effective only when
+((GPIO_<i>_ENABLE_ CONFIG_0<j>_0.GPIO_ENABLE == ENABLE) && (GPIO_<i>_ENABLE_ CONFIG_0<j>_0.INTERRUPT_FUNCTION == ENABLE)).
+- The bit in this field is cleared based on GPIO_<i>/
+<iii>_INTERRUPT_CLEAR_0<j>_0.GPIO_INTERRUPT_CLEAR. In a Virtualized environment, the status reflects only the GPIOs belonging to VM. For the GPIO bit positions not mapped to VM, the corresponding bit in this field is written with "0" by hardware for software to read this register correctly.
+- GPIO_L_INTERRUPT_STATUS_G0_0
+- Offset: 0x13300
+- GPIO_L_INTERRUPT_STATUS_G1_0
+- Offset: 0x13304
+- GPIO_L_INTERRUPT_STATUS_G2_0
+- Offset: 0x13308
+- GPIO_L_INTERRUPT_STATUS_G3_0
+- Offset: 0x1330c
+- GPIO_L_INTERRUPT_STATUS_G4_0
+- Offset: 0x13310
+- GPIO_L_INTERRUPT_STATUS_G5_0
+- Offset: 0x13314
+- GPIO_L_INTERRUPT_STATUS_G6_0
+- Offset: 0x13318
+- GPIO_L_INTERRUPT_STATUS_G7_0
+- Offset: 0x1331c
+- GPIO_D_INTERRUPT_STATUS_G0_0
+- Offset: 0x15500
+
+- GPIO Control Registers
+- GPIO_D_INTERRUPT_STATUS_G1_0
+- Offset: 0x15504
+- GPIO_D_INTERRUPT_STATUS_G2_0
+- Offset: 0x15508
+- GPIO_D_INTERRUPT_STATUS_G3_0
+- Offset: 0x1550c
+- GPIO_D_INTERRUPT_STATUS_G4_0
+- Offset: 0x15510
+- GPIO_D_INTERRUPT_STATUS_G5_0
+- Offset: 0x15514
+- GPIO_D_INTERRUPT_STATUS_G6_0
+- Offset: 0x15518
+- GPIO_D_INTERRUPT_STATUS_G7_0
+- Offset: 0x1551c
+- GPIO_AF_INTERRUPT_STATUS_G0_0
+- Offset: 0x13900
+- GPIO_AF_INTERRUPT_STATUS_G1_0
+- Offset: 0x13904
+- GPIO_AF_INTERRUPT_STATUS_G2_0
+- Offset: 0x13908
+- GPIO_AF_INTERRUPT_STATUS_G3_0
+- Offset: 0x1390c
+- GPIO_AF_INTERRUPT_STATUS_G4_0
+- Offset: 0x13910
+- GPIO_AF_INTERRUPT_STATUS_G5_0
+- Offset: 0x13914
+- GPIO_AF_INTERRUPT_STATUS_G6_0
+- Offset: 0x13918
+- GPIO_AF_INTERRUPT_STATUS_G7_0
+- Offset: 0x1391c
+- GPIO_AD_INTERRUPT_STATUS_G0_0
+- Offset: 0x10500
+
+- GPIO Control Registers
+- GPIO_AD_INTERRUPT_STATUS_G1_0
+- Offset: 0x10504
+- GPIO_AD_INTERRUPT_STATUS_G2_0
+- Offset: 0x10508
+- GPIO_AD_INTERRUPT_STATUS_G3_0
+- Offset: 0x1050c
+- GPIO_AD_INTERRUPT_STATUS_G4_0
+- Offset: 0x10510
+- GPIO_AD_INTERRUPT_STATUS_G5_0
+- Offset: 0x10514
+- GPIO_AD_INTERRUPT_STATUS_G6_0
+- Offset: 0x10518
+- GPIO_AD_INTERRUPT_STATUS_G7_0
+- Offset: 0x1051c
+- GPIO_BB_INTERRUPT_STATUS_G0_0
+- Offset: 0x1b00
+- GPIO_BB_INTERRUPT_STATUS_G1_0
+- Offset: 0x1b04
+- GPIO_BB_INTERRUPT_STATUS_G2_0
+- Offset: 0x1b08
+- GPIO_BB_INTERRUPT_STATUS_G3_0
+- Offset: 0x1b0c
+- GPIO_BB_INTERRUPT_STATUS_G4_0
+- Offset: 0x1b10
+- GPIO_BB_INTERRUPT_STATUS_G5_0
+- Offset: 0x1b14
+- GPIO_BB_INTERRUPT_STATUS_G6_0
+- Offset: 0x1b18
+- GPIO_BB_INTERRUPT_STATUS_G7_0
+- Offset: 0x1b1c
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+
+- GPIO Control Registers
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0000)
+- Bit
+- Rese
+t
+- Description
+

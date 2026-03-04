@@ -1,0 +1,18 @@
+﻿# 31 :16 X MASK_SPARE: 0 = INIT X EPFETCH_WAIT_CTX_FREEZE_CLEAR: 1 = INIT X MASK_NOACTIV: 0 = DIS 1 = EN
+
+
+- XHCI Controller Configuration Registers
+- Bit
+- Reset
+- Description
+X SPLITS_STOP_EP_CTRL: 0 = INIT X MODR8_CTRL_TFER: 0 = DIS 1 = EN X PRDC2ASYNC_EARLY_START: 0 = INIT X EPFETCH_USE_PFID: 0 = DIS 1 = EN X MASK_ISOMISS: 0 = DIS 1 = EN X MASK_OPDONE: 0 = DIS 1 = EN X LOCAL_ROTATE: 0 = DIS 1 = EN 1 = INIT X CTX_FORCE_FETCH: 0 = FALSE 1 = TRUE T_XUSB_CFG_FSBX_CTRL_0
+- Offset: 0x600
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00004120 (0b0000,0000,0000,0000,0100,00x1,0x10,xxxx)
+- Bit
+- Reset
+- Description
+

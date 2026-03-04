@@ -1,0 +1,2 @@
+﻿# 6000 Mbps. 12 = HDMI_FRL_3G: Select the 3G link clock; PLL generates 3 GHz from 100 MHz (multiplier = 30). 13 = HDMI_FRL_6G: Select the 6G link clock; PLL generates 6 GHz from 100 MHz (multiplier = 60). 14 = HDMI_FRL_8G: Select the 8G link clock; PLL generates 8 GHz from 100 MHz (multiplier = 80). 15 = HDMI_FRL_10G: Select the 10G link clock; PLL generates 10 GHz from 100 MHz (multiplier = 100). 16 = HDMI_FRL_12G: Select the 12G link clock; PLL generates 12 GHz from 100 MHz (multiplier = 120). 17 = EDP_6_75GHZ: Selects the 6.75 GHz link clock; PLL generates
+

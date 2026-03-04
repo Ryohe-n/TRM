@@ -1,0 +1,6 @@
+﻿# 0 = NONE 1 = INTR 2 = RST 15:14
+
+- NONE
+VDD_CPU1_MAX_FAULT_ACTION:
+- Reserved
+

@@ -1,0 +1,26 @@
+﻿# 23 :20 0x0 END_MINOR: 0 = INIT 19:16 0x0 END_MAJOR: 0 = INIT 15:12 0x0 START_MINOR: 0 = INIT 11:8 0x0 START_MAJOR: 0 = INIT 0x0 CLEAR: 0 = NOT_PENDING 1 = PENDING 1 = TRIGGER 0x0 RUN: 0 = STOP 1 = RUN T_XUSB_DEV_XHCI_HSFSPI_PVTPORTDBG_STS_0
+
+- Offset: 0x184
+- Read/Write: RO
+- Parity Protection: N
+
+- USB 3.0 Device Controller Memory-Mapped I/O Registers
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x000XXXXX (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+X TESTMODE_HS_PKT: X TESTMODE_HS_NAK: X TESTMODE_HS_KSTATE: X TESTMODE_HS_JSTATE: X ENABLED_FS_RESUME: X ENABLED_FS_U3: X ENABLED_FS_U2: X ENABLED_FS_U0: X ENABLED_HS_RESUME: X ENABLED_HS_U3: X ENABLED_HS_U2: X ENABLED_HS_U0: X RESET_HS_PROLOG: X RESET_FS: X RESET_HS_RXCHIRPJ: X RESET_HS_RXCHIRPK: X RESET_HS_TXCHIRPK: X DISABLED_NONE: X DISCONNECTED_NONE: X START_NONE: T_XUSB_DEV_XHCI_HSFSPI_COUNT14_0
+- Offset: 0x18c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000040 (0bxxxx,xxxx,xx00,0000,0000,0000,0100,0000)
+
+- USB 3.0 Device Controller Memory-Mapped I/O Registers
+- Bit
+- Reset
+- Description
+

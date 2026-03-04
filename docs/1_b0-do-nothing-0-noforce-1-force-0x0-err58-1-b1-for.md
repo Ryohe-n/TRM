@@ -1,0 +1,16 @@
+﻿# 1 'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR58: 1'b1 -> Force Assertion of Mission Error Reporting for Parity Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_r5_ARCTL 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR57: 1'b1 -> Force Assertion of Mission Error Reporting for Parity Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_r5_ARADDR 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE
+
+
+- RCE Fabric Registers
+- Bit
+- Reset
+- Description
+0x0 ERR56: 1'b1 -> Force Assertion of Mission Error Reporting for Parity Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_W 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR55: 1'b1 -> Force Assertion of Mission Error Reporting for Parity Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_R 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR54: 1'b1 -> Force Assertion of Mission Error Reporting for Parity Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_B 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR53: 1'b1 -> Force Assertion of Mission Error Reporting for Parity Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_AW 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR52: 1'b1 -> Force Assertion of Mission Error Reporting for Parity Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_AR 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR51: 1'b1 -> Force Assertion of Mission Error Reporting for ECC SEC Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_r5_W 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR50: 1'b1 -> Force Assertion of Mission Error Reporting for ECC SEC Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_r5_R 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR49: 1'b1 -> Force Assertion of Mission Error Reporting for ECC DED Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_r5_W 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE
+
+- RCE Fabric Registers
+- Bit
+- Reset
+- Description
+0x0 ERR48: 1'b1 -> Force Assertion of Mission Error Reporting for ECC DED Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_r5_R 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR47: 1'b1 -> Force Assertion of Mission Error Reporting for ECC SEC Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_W 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR46: 1'b1 -> Force Assertion of Mission Error Reporting for ECC SEC Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_R 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR45: 1'b1 -> Force Assertion of Mission Error Reporting for ECC DED Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_W 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR44: 1'b1 -> Force Assertion of Mission Error Reporting for ECC DED Error on internal data path from NV_xce_mncpu_p_i_wrapper.CHANNEL_R 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR43: 1'b1 -> Force Assertion of Mission Error Reporting for Comparator Error from NV_xce_mncpu_p_i_wrapper 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR42: 1'b1 -> Force Assertion of Mission Error Reporting for Other Uncorrected
+- Error from NV_xce_mncbb_i_wrapper.MASTER_TIMEOUT
+

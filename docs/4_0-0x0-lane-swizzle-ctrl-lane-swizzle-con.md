@@ -1,0 +1,6 @@
+﻿# 4 :0 0x0 LANE_SWIZZLE_CTRL: Lane Swizzle control for Brick. Valid in both CPHY and DPHY modes.
+
+- For CPHY, all modes are supported. But for DPHY, some mode are not
+supported with different lane count. Only for 4 lanes: 00011 A0 A1 B0 B1 --> A0 B0 A1 B1 00100 A0 A1 B0 B1 --> A0 B1 A1 B0 00101 A0 A1 B0 B1 --> A0 B1 B0 A1 00010 A0 A1 B0 B1 --> A0 B0 B1 A1 01000 A0 A1 B0 B1 --> A1 B0 B1 A0 01001 A0 A1 B0 B1 --> A1 B0 A0 B1 01010 A0 A1 B0 B1 --> A1 B1 A0 B0 01011 A0 A1 B0 B1 --> A1 B1 B0 A0 01100 A0 A1 B0 B1 --> B0 A1 A0 B1 01101 A0 A1 B0 B1 --> B0 A1 B1 A0 01110 A0 A1 B0 B1 --> B0 A0 B1 A1 01111 A0 A1 B0 B1 --> B0 A0 A1 B1 10000 A0 A1 B0 B1 --> B0 B1 A1 A0 10001 A0 A1 B0 B1 --> B0 B1 A0 A1 10010 A0 A1 B0 B1 --> B1 A1 B0 A0 10011 A0 A1 B0 B1 --> B1 A1 A0 B0 10100 A0 A1 B0 B1 --> B1 B0 A0 A1 10101 A0 A1 B0 B1 --> B1 B0 A1 A0 10110 A0 A1 B0 B1 --> B1 A0 A1 B0 10111 A0 A1 B0 B1 --> B1 A0 B0 A1
+- Support for 1/2/4 lanes
+

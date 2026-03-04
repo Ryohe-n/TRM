@@ -1,0 +1,63 @@
+﻿# 10 Gbps transfer rates. All USB 3.2 ports support x1 only.
+
+- Note that due to throughput limitations in the xHCI controller, USB 3.2 port 0 and
+port 1 are connected to the same SuperSpeedPlus hub to share 10 Gbps total bandwidth, while USB 3.2 port 2 and port 3 share another 10 Gbps total bandwidth. Note also that in the case of two SuperSpeed devices connected to the same SuperSpeedPlus hub, due to scheduling policy reasons each SuperSpeed device may not be able sustain the full SuperSpeed unit bandwidth if the other is device is active. All USB 3.2 ports support hardware initiated U1 and U2 link power management as well as software initiated U3 (suspend) link power management.
+- Falcon Microcontroller
+The Orin xHCI controller integrates an NVIDIA Falcon microcontroller to perform the following tasks:
+- Command ring processing
+- Event ring management
+- Endpoint scheduling
+- Context save and restore
+#### 10.2.2.2 Interface Restrictions
+A USB 3.2 connector includes both USB 2.0 and USB 3.2 interface signals. The USB 2.0 interface signals of a USB 3.2 connector must also be assigned to the USB controller for xHCI specification compliance. Similarly, if the USB 3.2 interface signals are used to connect to a peripheral on the system board, such as a USB 3.2 hub, the USB 2.0 signals connecting to that peripheral must also be assigned to the USB controller.
+
+- USB Functional Description
+Any one of the USB 2.0 ports can be configured as a device port. Any one of the USB 3.2 port can be exclusively paired with the selected USB 2.0 port and operates as the USB 3.2 interface of the device port. Either a USB 2.0 or USB 3.2 interface can be active when the device port is connected to a remote host port.
+#### 10.2.2.3 Host and Memory Access Interfaces
+- The xHCI controller and USB 3.2 device controller use the APB interface as a register
+access interface for accessing the controller configuration and memory-mapped I/O registers. Both controllers have memory controller interfaces for direct memory accesses.
+#### 10.2.2.4 USB 3.2 Device Controller
+The USB 3.2 device controller allows the mobile platform to be accessed from a host device. Device
+- Mode supports both high/full speed and super speed with up to 15 IN and 15 OUT endpoints,
+where a control endpoint consists of one bidirectional endpoint. The endpoints can be configured by the driver to support transfer types of different device classes such as modem, storage, or input devices.
+#### 10.2.2.5 xHCI Controller Programming Interface
+The xHCI controller supports host functionality with host controller registers and data structures implemented as standard xHCI programming interface. The figure below illustrates the control and data paths block diagram of the xHCI controller.
+**Figure 10.5 xHCI Controller Block Diagram**
+
+- USB Functional Description
+The USB 3.2 device controller supports device functionality with device controller registers and data structures developed to resemble xHCI programming interface. The figure below illustrates the control and data paths block diagram of the USB 3.2 Device controller.
+**Figure 10.6 USB 3.2 Device Controller Block Diagram**
+#### 10.2.2.6 USB PADCTL
+The USB PAD Control logic is part of the ungated partition of the Vaux_soc power domain.
+- The USB PAD Control logic is a stand-alone APB slave that accepts downstream requests for
+programming the PAD MUX and PAD specific parameters. The USB PAD Control logic also provides the programmability of the capabilities of the individual ports of xHCI controller and USB 3.2 Device controller.
+##### 10.2.2.6.1 USB PADCTL Features
+- Stand-alone APB slave
+- MMIO registers implemented under a stand-alone APB slave
+- MMIO space outside of xHCI host controller and device mode
+- USB Port Control
+- Global configuration for USB ports
+- Virtual GPIO
+- VBUS and ID assertion/detection status via dedicated sideband signals from VGPIO
+- Software overrides allow software to directly update status from accessing PMIC
+- Battery Charging
+
+- USB Programming Guidelines
+- Supports standard and charging downstream port identification control when programmed
+as host/downstream ports
+- Supports charging port detection reporting as when programmed device/upstream ports
+#### 10.2.2.7 USB AO
+The USB AO logic is part of the Always-On power domain. The USB AO logic is a stand-alone APB slave that accepts downstream requests for setting up and accessing the USB port wake detection and reporting features.
+##### 10.2.2.7.1 USB AO Features
+- Stand-alone APB slave
+- MMIO registers implemented under a stand-alone APB slave
+- MMIO space outside of xHCI host controller and device mode
+- USB 2.0 PAD parameters
+- USB 2.0 pad parameter configurations
+- AO version pad parameters applied under master_enable mode
+- USB 2.0 sleepwalk
+- Detect USB 2.0 wake events with programmable conditions
+- React to wake events with four-step sleepwalk sequencer
+- USB 3.2 Wake
+- Detect USB 3.2 wake events with port status from each USB 3.1 port
+

@@ -1,0 +1,2 @@
+﻿# 19 :16 0x1 MINORREV: The encoding of this field is as below. A,B,C,D denote major revs, while 01, 02, 03 denote minor revision. 0000:Reserved 0001:A01 0010:A02 0011:A03 0100:Reserved 0101:B01 0110:B02 0111:B03 1000:Reserved 1001:C01 1010:C02 1011:C03 1100:Reserved 1101:D01 1110:D02 1111:D03 15:8 0x23 CHIPID: Upper two digits of the SoC ID. 7:4 0x4 MAJORREV: This field provides the last digit of the Chip ID. 3:0 0x7 HIDFAM: Chip ID family register. 0-6 = reserved for other NVIDIA products 7 = APXX_TXX (NVIDIA SOC)
+

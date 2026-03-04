@@ -1,0 +1,19 @@
+﻿# 9 :8 0x0 PORT2_CAP: 0 = DISABLED 1 = HOST_ONLY 2 = DEVICE_ONLY 3 = OTG_CAP 0x0 PORT1_REVERSE_ID: 0 = NO 1 = YES 0x0 PORT1_INTERNAL: 0 = NO 1 = YES 5:4 0x0 PORT1_CAP: 0 = DISABLED 1 = HOST_ONLY 2 = DEVICE_ONLY 3 = OTG_CAP 0x0 PORT0_REVERSE_ID: 0 = NO 1 = YES 0x0 PORT0_INTERNAL: 0 = NO 1 = YES 1:0 0x0 PORT0_CAP: 0 = DISABLED 1 = HOST_ONLY 2 = DEVICE_ONLY 3 = OTG_CAP
+
+- XUSB_PADCTL_SS_PORT_CAP_0
+- Offset: 0xc
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 PORT3_REVERSE_ID: 0 = NO 1 = YES 0x0 PORT3_INTERNAL: 0 = NO 1 = YES
+
+- USB PADCTL and AO Registers
+- Bit
+- Reset
+- Description
+

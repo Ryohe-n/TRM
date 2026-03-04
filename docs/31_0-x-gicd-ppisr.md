@@ -1,0 +1,44 @@
+﻿# 31 :0 X GICD_PPISR:
+
+- Private Peripheral Interrupt Status Register
+- AGIC_DISTRIBUTOR_GICD_SPISR<m>_0,
+where <m> = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14.
+- AGIC_DISTRIBUTOR_GICD_SPISR0_0
+- Offset: 0x1d04
+- AGIC_DISTRIBUTOR_GICD_SPISR1_0
+- Offset: 0x1d08
+- AGIC_DISTRIBUTOR_GICD_SPISR2_0
+- Offset: 0x1d0c
+- AGIC_DISTRIBUTOR_GICD_SPISR3_0
+- Offset: 0x1d10
+- AGIC_DISTRIBUTOR_GICD_SPISR4_0
+- Offset: 0x1d14
+- AGIC_DISTRIBUTOR_GICD_SPISR5_0
+- Offset: 0x1d18
+- AGIC_DISTRIBUTOR_GICD_SPISR6_0
+- Offset: 0x1d1c
+- AGIC_DISTRIBUTOR_GICD_SPISR7_0
+- Offset: 0x1d20
+- AGIC_DISTRIBUTOR_GICD_SPISR8_0
+- Offset: 0x1d24
+- AGIC_DISTRIBUTOR_GICD_SPISR9_0
+- Offset: 0x1d28
+- AGIC_DISTRIBUTOR_GICD_SPISR10_0
+- Offset: 0x1d2c
+- AGIC_DISTRIBUTOR_GICD_SPISR11_0
+- Offset: 0x1d30
+
+- Audio Generic Interrupt Control (AGIC) Registers
+- AGIC_DISTRIBUTOR_GICD_SPISR12_0
+- Offset: 0x1d34
+- AGIC_DISTRIBUTOR_GICD_SPISR13_0
+- Offset: 0x1d38
+- AGIC_DISTRIBUTOR_GICD_SPISR14_0
+- Offset: 0x1d3c
+- Read/Write: RO
+- Parity Protection: N
+- Reset: 0xXXXXXXXX (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+

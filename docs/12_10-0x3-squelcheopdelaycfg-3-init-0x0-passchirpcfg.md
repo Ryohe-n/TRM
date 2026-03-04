@@ -1,0 +1,24 @@
+﻿# 12 :10 0x3 SQUELCHEOPDELAYCFG: 3 = INIT 0x0 PASSCHIRPCFG: 0 = INIT 0x0 PASSFEEDBACKCFG: 0 = INIT 7:6 0x0 PCOUNTINERTIACFG: 0 = INIT 5:4 0x0 PHASEADJUSTCFG: 0 = INIT 0x0 THREESYNCBITSCFG: 0 = INIT 0x0 USE4SYNCTRANCFG: 0 = INIT 0x1 T210_A02_MODE: 1 = INIT 0x1 MCP_MODE: 1 = INIT T_XUSB_DEV_XHCI_HSFSPI_CTRL1_0
+
+- Offset: 0x198
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x000b1710 (0bxxxx,xxxx,xxx0,1011,xx01,0111,0001,0000)
+- Bit
+- Reset
+- Description
+0x1 FILTERED_BUS_IDLE: 1 = INIT 13:9 0x9 FS_IDLE_BITTIMES: 9 = INIT 0x1 BABBLE_TIMEOUT_CYA: 1 = INIT 7:0 0x10 BABBLE_TIMEOUT_VAL: 16 = INIT T_XUSB_DEV_XHCI_HSFSPI_COUNT16_0
+- Offset: 0x19c
+- Read/Write: R/W
+- Parity Protection: N
+
+- USB 3.0 Device Controller Memory-Mapped I/O Registers
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x000927c0 (0bxx00,0000,0000,1001,0010,0111,1100,0000)
+- Bit
+- Reset
+- Description
+

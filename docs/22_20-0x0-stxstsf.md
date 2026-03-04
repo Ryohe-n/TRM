@@ -1,0 +1,36 @@
+﻿# 22 :20 0x0 STXSTSF:
+
+- Number of Status Words in Tx Status FIFO of Queue This field indicates the
+current number of status in the Tx Status FIFO of this queue. When the
+- DTXSTS bit of MTL_Operation_Mode register is set to 1, this field does not
+reflect the number of status words in Tx Status FIFO. 0x0 Reserved_19: Reserved. 18:16 0x0 PTXQ:
+- Number of Packets in the Transmit Queue This field indicates the current
+number of packets in the Tx Queue. When the DTXSTS bit of
+- MTL_Operation_Mode register is set to 1, this field does not reflect the
+number of packets in the Transmit queue. 15:6 0x0 Reserved_15_6: Reserved. 0x0 TXSTSFSTS:
+- MTL Tx Status FIFO Full Status When high, this bit indicates that the MTL Tx
+- Status FIFO is full. Therefore, the MTL cannot accept any more packets for
+transmission. 0x0 TXQSTS:
+- MTL Tx Queue Not Empty Status When this bit is high, it indicates that the
+MTL Tx Queue is not empty and some data is left for transmission. 0x0 TWCSTS:
+- MTL Tx Queue Write Controller Status When high, this bit indicates that the
+- MTL Tx Queue Write Controller is active, and it is transferring the data to the
+Tx Queue. 2:1 0x0 TRCSTS:
+- MTL Tx Queue Read Controller Status This field indicates the state of the Tx
+Queue Read Controller: 0x0 TXQPAUSED:
+- Transmit Queue in Pause When this bit is high and the Rx flow control is
+enabled, it indicates that the Tx Queue is in the Pause condition (in the full- duplex only mode) because of the following: - Reception of the PFC packet for the priorities assigned to the Tx Queue when PFC is enabled - Reception of 802.3x Pause packet when PFC is disabled
+- EQOS_EQOS_MTL_Q0_MTL_TXQ0_ETS_STATUS_0
+The Queue 0 ETS Status register provides the average traffic transmitted in Queue 0.
+- Offset: 0xd14
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+1G Ethernet Controller Core Registers
+- Bit
+- Reset
+- Description
+

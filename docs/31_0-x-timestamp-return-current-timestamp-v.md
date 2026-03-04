@@ -1,0 +1,126 @@
+﻿# 31 :0 X TIMESTAMP: return current timestamp value inside VI Notify
+
+- VI_NOTIFY_INFIFO_TIMESTAMP_OVRFLOW_ERR_STATUS_0
+- Offset: 0x2807
+- Byte Offset: 0xa01c
+
+- Video Input Registers
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxx0,0000,0000)
+- Bit
+- Reset
+- Description
+0x0
+- TIMESTAMP_OVRFLOW_ERR_MISC
+0x0
+- TIMESTAMP_OVRFLOW_ERR_ATOMP
+0x0
+- TIMESTAMP_OVRFLOW_ERR_ATOMPSTATUS
+0x0
+- TIMESTAMP_OVRFLOW_ERR_ATOMPDVFS
+0x0
+- TIMESTAMP_OVRFLOW_ERR_CHANSEL_XCPTMISC
+0x0
+- TIMESTAMP_OVRFLOW_ERR_CHANSEL_XCPT
+0x0
+- TIMESTAMP_OVRFLOW_ERR_CHANSEL
+0x0
+- TIMESTAMP_OVRFLOW_ERR_CSIMUX_STREAM
+0x0 TIMESTAMP_OVRFLOW_ERR_CSIMUX_FRAME:
+- VI_NOTIFY_INFIFO_TIMESTAMP_OVRFLOW_ERR_MASK_0
+- Offset: 0x2808
+- Byte Offset: 0xa020
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxx0,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 TIMESTAMP_OVRFLOW_ERR_MISC_MASK: 0 = DISABLED 1 = ENABLED 0x0 TIMESTAMP_OVRFLOW_ERR_ATOMP_MASK: 0 = DISABLED 1 = ENABLED 0x0 TIMESTAMP_OVRFLOW_ERR_ATOMPSTATUS_MASK: 0 = DISABLED 1 = ENABLED 0x0 TIMESTAMP_OVRFLOW_ERR_ATOMPDVFS_MASK: 0 = DISABLED 1 = ENABLED
+
+- Video Input Registers
+- Bit
+- Reset
+- Description
+0x0 TIMESTAMP_OVRFLOW_ERR_CHANSEL_XCPTMISC_MASK: 0 = DISABLED 1 = ENABLED 0x0 TIMESTAMP_OVRFLOW_ERR_CHANSEL_XCPT_MASK: 0 = DISABLED 1 = ENABLED 0x0 TIMESTAMP_OVRFLOW_ERR_CHANSEL_MASK: 0 = DISABLED 1 = ENABLED 0x0 TIMESTAMP_OVRFLOW_ERR_CSIMUX_STREAM_MASK: 0 = DISABLED 1 = ENABLED 0x0 TIMESTAMP_OVRFLOW_ERR_CSIMUX_FRAME_MASK: 0 = DISABLED 1 = ENABLED
+- VI_NOTIFY_ECC_ERR_INJ_0
+- Offset: 0x2809
+- Byte Offset: 0xa024
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x01ff01ff (0bxxxx,xxx1,1111,1111,xxxx,xxx1,1111,1111)
+- Bit
+- Reset
+- Description
+0x1
+- DED_ERR_INJ_ENABLE_MISC
+0x1
+- DED_ERR_INJ_ENABLE_ATOMP
+0x1
+- DED_ERR_INJ_ENABLE_ATOMPSTATUS
+0x1
+- DED_ERR_INJ_ENABLE_ATOMPDVFS
+0x1
+- DED_ERR_INJ_ENABLE_CHANSEL_XCPTMISC
+0x1
+- DED_ERR_INJ_ENABLE_CHANSEL_XCPT
+0x1
+- DED_ERR_INJ_ENABLE_CHANSEL
+0x1
+- DED_ERR_INJ_ENABLE_CSIMUX_STREAM
+0x1 DED_ERR_INJ_ENABLE_CSIMUX_FRAME: double ecc error injection enable
+
+- Video Input Registers
+- Bit
+- Reset
+- Description
+0x1
+- SEC_ERR_INJ_ENABLE_MISC
+0x1
+- SEC_ERR_INJ_ENABLE_ATOMP
+0x1
+- SEC_ERR_INJ_ENABLE_ATOMPSTATUS
+0x1
+- SEC_ERR_INJ_ENABLE_ATOMPDVFS
+0x1
+- SEC_ERR_INJ_ENABLE_CHANSEL_XCPTMISC
+0x1
+- SEC_ERR_INJ_ENABLE_CHANSEL_XCPT
+0x1
+- SEC_ERR_INJ_ENABLE_CHANSEL
+0x1
+- SEC_ERR_INJ_ENABLE_CSIMUX_STREAM
+0x1 SEC_ERR_INJ_ENABLE_CSIMUX_FRAME: single ecc error injection enable
+- VI_NOTIFY_TIMESTAMP_CTRL_0
+- Offset: 0x280a
+- Byte Offset: 0xa028
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx0)
+- Bit
+- Reset
+- Description
+0x0 ENABLE: to enable notify TSC sync FIFO rd request propagate downwards. Enable this bit before data transition. trying to gate off unexpected ram X data when pwrbus_ram_pd is high during sync reset period.
+- VI_FALCON_CSB_HWR_DATA_1_0
+- Offset: 0x3000
+- Byte Offset: 0xc000
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxx0,0000,0000,0000,0000,0000,0000)
+
+- Video Input Registers
+- Bit
+- Reset
+- Description
+

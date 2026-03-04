@@ -1,0 +1,4 @@
+﻿# 0 = DISABLED 1 = ALARM_A 2 = ALARM_B 3 = ALARM_C 25:24 0x0 BBC_STS_1100:
+
+- Mapping of BBC 1100->OC Alarm
+

@@ -1,0 +1,4 @@
+﻿# 0 = NOINTR 1 = INTR 0x0 ATOMP_TRUNCATED_ERR_STATUS:
+
+- ATOMP Truncated happened
+

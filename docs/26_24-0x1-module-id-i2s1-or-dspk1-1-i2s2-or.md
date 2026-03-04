@@ -1,0 +1,4 @@
+﻿# 26 :24 0x1 MODULE_ID: I2S1 or DSPK1 = 1, I2S2 or DSPK2 = 2 and so on. 22:16 0x19
+
+- FIFO_HIGH_THRESHOLD
+
