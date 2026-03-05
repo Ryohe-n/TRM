@@ -1,0 +1,65 @@
+﻿# 5. CPU Complex (CCPLEX)
+
+## 5.0 GT/s - Bit 2 8.0 GT/s - Bit 3 16.0 GT/s - Bit 4 32.0 GT/s - Bits 6:5 RsvdP
+- Multi-Function Devices associated with an Upstream Port must report
+the same value in this field for all Functions. This field has a default of (PCIE_CAP_MAX_LINK_SPEED == 0101) ? 0011111 : (PCIE_CAP_MAX_LINK_SPEED == 0100) ? 0001111 : (PCIE_CAP_MAX_LINK_SPEED == 0011) ? 0000111 : (PCIE_CAP_MAX_LINK_SPEED == 0010) ? 0000011 : 0000001 where
+- PCIE_CAP_MAX_LINK_SPEED is a field in the LINK_CAPABILITIES_REG
+register.
+- RO
+0x0 RSVDP_0: Reserved for future use.
+
+- PCIe x4/x8 Endpoint
+- PCIE_X<j>_EP_PF0_PCIE_CAP_LINK_CONTROL2_LINK_STATUS2_REG_0
+where <j> = 4, 8. Description:This register controls and provides information about PCI Express Link specific parameters; in addition to the Link Control and Link Status Register.
+- PCIE_X4_EP_PF0_PCIE_CAP_LINK_CONTROL2_LINK_STATUS2_REG_0
+- PCIE_X8_EP_PF0_PCIE_CAP_LINK_CONTROL2_LINK_STATUS2_REG_0
+- Offset: 0xa0
+- Read/Write: See table below
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x01010004 (0bxxxx,0001,0000,0001,0000,0000,0000,0100)
+- Bit
+R/W
+- Reset
+- Description
+27:26
+- RO
+0x0 RSVDP_26: Reserved for future use. 25:24
+- RO
+0x1 PCIE_CAP_CROSSLINK_RESOLUTION:
+- Crosslink Resolution. This field indicates the state of the Crosslink
+negotiation. It must be implemented if Crosslink Supported is Set and the
+- Port supports 16.0 GT/s or higher data rate. It is permitted to be
+implemented in all other Ports. If Crosslink Supported is clear, the controller hardwires this field to 01b or 10b. Once a value of 01b or 10b is returned in this field, that value must continue to be returned while the Link is Up.
+- RO
+0x0 PCIE_CAP_TWO_RETIMERS_PRE_DET:
+- Two Retimers Presence Detected. When set to 1b, this bit indicates that
+two Retimers were present during the most recent Link negotiation. For more details, see section 4.2.6.3.5.1 of PCI Express Base Specification. This bit is required for Ports that have the Two Retimers Presence Detect
+- Supported bit of the Link Capabilities 2 register set to 1b. Ports that have
+the Two Retimers Presence Detect Supported bit set to 0b are permitted to hardwire this bit to 0b. For Multi-Function Devices associated with an
+- Upstream Port, this bit must be implemented in Function 0 and RsvdZ in all
+other Functions. Note: This register field is sticky.
+- RO
+0x0 PCIE_CAP_RETIMER_PRE_DET:
+- Retimer Presence Detected. When set to 1b, this bit indicates that a
+- Retimer was present during the most recent Link negotiation. For more
+details, see section 4.2.6.3.5.1 of PCI Express Base Specification. This bit is required for Ports that have the Retimer Presence Detect Supported bit of the Link Capabilities 2 register set to 1b. For Ports that have the Retimer
+- Presence Detect Supported bit set to 0b, the controller hardwires this bit
+to 0b. For Multi-Function Devices associated with an Upstream Port, this bit must be implemented in Function 0 and is RsvdZ in all other Functions. Note: This register field is sticky.
+
+- PCIe x4/x8 Endpoint
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 PCIE_CAP_LINK_EQ_REQ:
+- Link Equalization Request 8.0 GT/s. This bit is set by hardware to request
+the 8.0 GT/s Link equalization process to be performed on the Link. For more details, see sections 4.2.3 and 4.2.6.4.2 of PCI Express Base
+- Specification. For Multi-Function Upstream Port, this bit must be
+implemented in Function 0 and RsvdZ in other Functions. For components that only support speeds below 8.0 GT/s, the controller hardwires this bit to 0b.
+- RO
+0x0 PCIE_CAP_EQ_CPL_P3:
+- EEqualization 8.0 GT/s Phase 3 Successful. When set to 1b, this bit
+indicates that Phase 3 of the 8.0 GT/s Transmitter Equalization procedure has successfully completed. Details of the Transmitter Equalization process and when this bit needs to be set to 1b is provided in section

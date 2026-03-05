@@ -1,116 +1,105 @@
-# update-docs.ps1 (PowerShell 5 compatible)
-$Source  = "SOURCE.md"   # 分割元（巨大Markdown）
-$DocsDir = "docs"
+# update-docs.ps1 (PowerShell 5.1)
+# Split SOURCE.md by Markdown headings "## X.Y ..."
 
-New-Item -ItemType Directory -Force $DocsDir | Out-Null
+param(
+  [string]$SourcePath = "SOURCE.md",
+  [string]$OutDir = "docs",
+  [string]$ReadmePath = "README.md"
+)
 
-function SafeName([string]$s) {
+function Ensure-Dir([string]$p) {
+  if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null }
+}
+
+function Slugify([string]$s) {
   if ($null -eq $s) { $s = "" }
   $s = $s.Trim()
-  if ([string]::IsNullOrWhiteSpace($s)) { return "section" }
+  if ($s.Length -eq 0) { return "section" }
 
-  $s = $s.ToLower()
-  $s = $s -replace '[^a-z0-9]+','-'
+  $s = $s -replace '[`*_<>\\/:|?"\[\]\(\)\{\}]', ''
+  $s = $s -replace '\s+', '-'
+  $s = $s -replace '-+', '-'
   $s = $s.Trim('-')
-
-  if ($s.Length -gt 50) { $s = $s.Substring(0,50).Trim('-') }
-  if ([string]::IsNullOrWhiteSpace($s)) { $s = "section" }
+  $s = ($s.ToLower() -replace '[^a-z0-9\-]+', '')
+  if ($s.Length -eq 0) { return "section" }
+  if ($s.Length -gt 32) { $s = $s.Substring(0,32).Trim('-') }
   return $s
 }
 
-# 見出し判定（# があってもなくてもOK）
-# 対象:
-#   1
-#   2.1
-#   7.2.4
-# を拾う（最大3階層）
-$rx = '^\s*(?:#{1,6}\s*)?(\d+(?:\.\d+){0,2})\b(?!\.)\s*(.*)\s*$'
+Ensure-Dir $OutDir
+if (-not (Test-Path $SourcePath)) { throw "SOURCE not found: $SourcePath" }
 
-$lines = Get-Content $Source -Encoding UTF8
+# 前回生成物を掃除（*.mdを全部消すのが嫌ならパターン絞って）
+Remove-Item -Force (Join-Path $OutDir "*.md") -ErrorAction SilentlyContinue
 
-$sections = New-Object System.Collections.Generic.List[object]
+$lines = Get-Content -LiteralPath $SourcePath -Encoding UTF8
 
-$currentKey   = "0"
-$currentTitle = "Preamble"
-$currentBody  = New-Object System.Collections.Generic.List[string]
+# 重要： "## " だけをトリガーにする（誤爆しない）
+# 例: "## 7.2 Camera Interface"
+$h2 = '^\s*##\s*([0-9]{1,2})\.([0-9]{1,2})\s*(.*)\s*$'
 
-function FlushSection {
-  param(
-    [string]$key,
-    [string]$title,
-    [System.Collections.Generic.List[string]]$body
-  )
+$currentKey = $null
+$currentTitle = $null
+$currentPath = $null
 
-  $text = ($body -join "`n").Trim()
-  if ([string]::IsNullOrWhiteSpace($text)) { return }
+$index = @()
 
-  $sections.Add([pscustomobject]@{
-    Key=$key; Title=$title; Body=$text
-  }) | Out-Null
+function Start-Section([int]$a, [int]$b, [string]$title) {
+  $key = ("{0}.{1}" -f $a, $b)
+  $safe = Slugify $title
+
+  # 07.02 形式（短く・ソートしやすい）
+  $fname = ("{0:D2}.{1:D2}_{2}.md" -f $a, $b, $safe)
+  $path = Join-Path $OutDir $fname
+
+  # 見出し入れて新規作成
+  ("# {0} {1}`n" -f $key, $title) | Set-Content -LiteralPath $path -Encoding UTF8
+
+  $script:index += [pscustomobject]@{
+    Key = $key
+    A = $a
+    B = $b
+    Title = $title
+    File = (Join-Path $OutDir $fname)
+  }
+
+  return @($key, $path)
 }
 
 foreach ($line in $lines) {
-  $m = [regex]::Match($line, $rx)
+  $m = [regex]::Match($line, $h2)
   if ($m.Success) {
-    # 直前セクション確定
-    FlushSection -key $currentKey -title $currentTitle -body $currentBody
-
-    $currentKey = $m.Groups[1].Value
-    $t = $m.Groups[2].Value
+    $a = [int]$m.Groups[1].Value
+    $b = [int]$m.Groups[2].Value
+    $t = $m.Groups[3].Value
     if ($null -eq $t) { $t = "" }
     $t = $t.Trim()
     if ([string]::IsNullOrWhiteSpace($t)) { $t = "Section" }
-    $currentTitle = $t
 
-    $currentBody  = New-Object System.Collections.Generic.List[string]
-
-    # 各ファイルは H1 で統一
-    $currentBody.Add("# $currentKey $currentTitle") | Out-Null
-    $currentBody.Add("") | Out-Null
+    $res = Start-Section -a $a -b $b -title $t
+    $currentKey = $res[0]
+    $currentPath = $res[1]
     continue
   }
 
-  $currentBody.Add($line) | Out-Null
-}
-
-# 最後 flush
-FlushSection -key $currentKey -title $currentTitle -body $currentBody
-
-# docs 出力
-$written = @()
-foreach ($s in $sections) {
-  $safe = SafeName $s.Title
-  $fileName = "{0}_{1}.md" -f $s.Key, $safe
-  $path = Join-Path $DocsDir $fileName
-
-  Set-Content -Path $path -Value ($s.Body + "`n") -Encoding UTF8
-
-  $written += [pscustomobject]@{
-    Key=$s.Key; Title=$s.Title; File=("docs/" + $fileName)
+  if ($null -ne $currentPath) {
+    Add-Content -LiteralPath $currentPath -Encoding UTF8 -Value $line
   }
 }
 
-# キーの数値ソート (1 < 2 < 2.1 < 2.1.3)
-function KeySortValue([string]$k) {
-  $p = $k.Split('.')
-  $a = 0; $b = 0; $c = 0
-  if ($p.Length -ge 1) { $a = [int]$p[0] }
-  if ($p.Length -ge 2) { $b = [int]$p[1] }
-  if ($p.Length -ge 3) { $c = [int]$p[2] }
-  return ("{0:D4}.{1:D4}.{2:D4}" -f $a, $b, $c)
+# README生成
+$sorted = $index | Sort-Object A,B
+$sb = New-Object System.Text.StringBuilder
+[void]$sb.AppendLine("# TRM (Markdown)")
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine("## Contents (X.Y)")
+[void]$sb.AppendLine("")
+
+foreach ($it in $sorted) {
+  $rel = $it.File -replace '^[.\\\/]+', ''
+  $rel = $rel -replace '\\','/'
+  [void]$sb.AppendLine(("* [{0} {1}]({2})" -f $it.Key, $it.Title, $rel))
 }
 
-# README 目次生成（軽量）
-$readme = New-Object System.Collections.Generic.List[string]
-$readme.Add("# TRM") | Out-Null
-$readme.Add("") | Out-Null
-$readme.Add("## Contents") | Out-Null
-$readme.Add("") | Out-Null
-
-foreach ($w in ($written | Sort-Object @{Expression={ KeySortValue $_.Key }})) {
-  $readme.Add("- [$($w.Key) $($w.Title)]($($w.File))") | Out-Null
-}
-
-Set-Content -Path "README.md" -Value ($readme -join "`n") -Encoding UTF8
-
-Write-Host ("Done. Wrote {0} files to docs/ and rebuilt README.md" -f $written.Count) -ForegroundColor Green
+$sb.ToString() | Set-Content -LiteralPath $ReadmePath -Encoding UTF8
+Write-Host ("Done. Sections written: {0}" -f $sorted.Count) -ForegroundColor Green
