@@ -1,0 +1,73 @@
+﻿# 10. Start with the‘RGE functionality.
+
+##### 10.17.2.1.2 Fan Control
+The figure below provides the overview of the tachometer solution for fan control implementation.
+
+Fan Tachometer
+**Figure 10.166 Tachometer Solution for Fan Control**
+The input temperature is mapped to the RPM, based on the temperature vs RPM curve, in order to get the target RPM. The PWM output controller sets the period and duty cycle of PWM_OUT which is fed as an input to the four-wire fan. Based on the tachometer input, the period and window length are stored in the tachometer registers. Software reads the data from these registers periodically, calculates the RPM, and compares with the target RPM. PWM parameters are determined in the RPM correction logic block and serves as an input to the PWM output controller. Interrupt Functionality If Fan RPMs (revolutions per minute) are not monitored, the device can run into power and thermal issues if the Fan RPM moves outside of an expected range. To detect this, interrupt functionality is added to the TACH controller. The TACH controller has the ability to assert interrupt when PERIOD in the WIN_LENGTH field or the number of revolutions programmed into MONITOR_TIME goes higher than UPPER_THRESHOLD or lower than LOWER_THRESHOLD. A configuration bit is provided for software to select the type of monitoring required. For possible conditions when the Fan is spinning too fast: Fan inlet and or exhaust is blocked Damage such as dust
+
+Fan Tachometer For possible conditions when the Fan is spinning too slow: Over aging Fan Physical damage to the fan By default, the interrupt functionality is disabled and should be enabled by software after programming the thresholds. When any threshold violation happens, the ERR_STATUS register will capture the error condition (i.e., UNDERRUN or OVERRUN) and the period counter value (ERR_PERIOD) when the error was detected. Hardware provides a configuration bit (STOP_ON_ERR) for software to select if the controller should be stopped on error or continue in the next window. Note: In case of a delay in servicing previous interrupt (e.g., UNDERRUN), if the hardware encounters another error condition (e.g., OVERRUN), hardware will clear the previous logged error from the status register and update the status register with the current error condition.
+### 10.17.3 Programming Guidelines
+For RPM calculation (no RPM monitoring required) 1. Program the WIN_LENGTH field in register TACH_FAN_TACH0_0 based on the Fan Pulse Per Rotations (PPR) value. Read the PERIOD value from register TACH_FAN_TACH0_0 periodically to calculate RPM using RPM calculation. 2. To enable interrupt functionality to monitor the RPM variation for every window length 1. 2. Program the WIN_LENGTH field in register TACH_FAN_TACH0_0 based on FAN PPR value. Program the lower and upper limit of the PERIOD variation in units of micro-seconds in TACH_FAN_TACH_UPPER_THRESHOLD_0 and TACH_FAN_TACH_LOWER_THRESHOLD_0. Enable UNDERRUN/OVERRUN/COUNTER_OVERFLOW interrupts by setting TACH_FAN_TACH_INTERRUPT_ENABLE_0 fields. Write ‘0’ to TACH_FAN_TACH_CONTROL_0_ERR_CONFIG. Program TACH_FAN_TACH_CONTROL_0_STOP_ON_ERR based on the requirements and set FAN_TACH_CONTROL_0_LOAD_CONFIG. 3. 4. 5. To enable interrupt functionality to monitor the RPM variation by monitoring the number of pulses over time 1. Program the lower and upper limit of the expected number of pulses in TACH_FAN_TACH_UPPER_THRESHOLD_0 and TACH_FAN_TACH_LOWER_THRESHOLD_0. Program the time duration (in micro-seconds) during which the TACH input is monitored in TACH_FAN_TACH_CONTROL_0_MONITOR_TIME. Enable UNDERRUN/OVERRUN/COUNTER_OVERFLOW interrupts by setting TACH_FAN_TACH_INTERRUPT_ENABLE_0 fields. Write ‘1’ to TACH_FAN_TACH_CONTROL_0_ERR_CONFIG. 2. 3. 4.
+
+Fan Tachometer Registers 5. Program TACH_FAN_TACH_CONTROL_0_STOP_ON_ERR based on the requirements and set FAN_TACH_CONTROL_0_LOAD_CONFIG.
+#### 10.17.3.1 Interrupt Handling
+1. When software receives an interrupt from the controller, read the TACH_FAN_TACH_0_ERR_STATUS register for the source of interrupt. Software can read the TACH_FAN_TACH_0_ERR_PERIOD register to know the period value/ pulse count captured by the TACH controller when the error occurred. Software can clear the interrupt by writing ‘1’ to the error field in TACH_FAN_TACH_0_ERR_STATUS. 2. 3.
+### 10.17.4 Fan Tachometer Registers
+Refer to "Reading Register Tables" in the Introduction chapter for the register table protocol as well as recommendations for accessing registers. The Base Addresses of the registers related to Fan Tachometer are specified in the Address Map section of the TRM. TACH_FAN_TACH0_0 Offset: 0x0 Read/Write: See table below Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000000 (0bxxxx,x000,0000,0000,0000,0000,0000,0000) Bit R/W Reset Description 26:25 RW 0x0 WIN_LENGTH: This field defines the window of the FAN TACH monitor. The window indicates how many periods of the input fan tach signal that the FAN TACH logic will monitor. The window starts from the rising edge of the fan tach signal. ONE: Set window length to 1. Monitor only 1 period. TWO: Set window length to 2. Monitor the consecutive two periods. FOUR: Set window length to 4. Monitor the consecutive four periods. EIGHT: Set window length to 8. Monitor the consecutive eight periods. This is needed as the fan generates Pulses per rotation (PPR) which are detected by the input. For example, in a 2PPR Fan, in one time period, we might be covering 172 degrees. So we should measure for two cycles in this case. Similarly in 4PPR, it should be four cycles. Change of WIN_LENGTH field on the fly takes effect only when the current PERIOD calculation is complete. 0 = ONE 1 = TWO 2 = FOUR 3 = EIGHT
+
+### OCR (Page 13607) ~~~text Technical Reference Manual
+Fan Tachometer Registers
+5. Program TACH_FAN_TACH_CONTROL_O_STOP_ON_ERR based on the requirements.and’set
+FAN_TACH_CONTROL_O_LOAD_CONFIG.
+10.17.3.1 Interrupt Handling
+1. When software receives an interrupt from the controller, read the
+TACH_FAN_TACH_O_ERR_STATUS register for the source of interrupt.
+2. Software can read the TACH_FAN_TACH_O_ERR_PERIOD register to know the period value/
+pulse count captured by the TACH controller when the error occurred.
+3. Software can clear the interrupt by writing ‘1’ to the error field in
+TACH_FAN_TACH_O_ERR_STATUS.
+10.17.4 Fan Tachometer Registers
+Refer to "Reading Register Tables" in the Introduction chapter for the register table protocol as well
+as recommendations for accessing registers.
+The Base Addresses of the registers related to Fandtachometer are specified in the Address Map
+section of the TRM.
+TACH_FAN_TACHO_O
+Offset: OxO
+Read/Write: See table below
+Parity Protection: N
+Shadow: N
+SCR Protection: O
+Reset: 0x00000000 (Obxxxx,x000,0000,0000,0000,0000,0000,0000)
+Bit R/W Reset Description
+26:25 RW 0x0 WIN_LENGTH:
+This field defines the window of the FAN TACH monitor. The window
+indicates how many periods of the input fan tach signal that the FAN
+TACH logic will monitor. The window starts from the rising edge of
+the fan tach signal.
+ONE: Set window length to 1. Monitor only 1 period.
+TWO: Set window length to 2. Monitor the consecutive two periods.
+FOUR: Set window length to 4. Monitor the consecutive four periods.
+EIGHT: Set window length to 8. Monitor the consecutive eight
+periods.
+This is needed as the fan generates Pulses per rotation (PPR) which
+are detected by the input. For example, in a 2PPR Fan, in one time
+period, we might be covering 172 degrees. So we should measure for
+two cycles in this case. Similarly in 4PPR, it should be four cycles.
+Change of WIN_LENGTH field on the fly takes effect only when the
+current PERIOD calculation is complete.
+O = ONE
+1= TWO
+2= FOUR
+3 = EIGHT ~~~
+
+Fan Tachometer Registers Bit R/W Reset Description RW 0x0 OVERFLOW: This field indicates the window period of the fan tach input exceeds 16s. This happens if the window period is too long. When the hardware first detects the period between rising edges exceeding 16s, this field is set to DETECTED, and PERIOD is set to MAX. Monitoring of the fan tach input is disabled until the next window rising edge is detected. This field remains at DETECTED until Software writes it to CLEAR, only then will it return to NONE. (Writing 1 clears the bit and writing 0 keeps overflow bit unchanged) 0 = NONE 1 = DETECTED 23:0 RO 0x0 PERIOD: This field indicates the period (N-1) of the fan tach input in units of 1 micro-second in a WIN_LENGTH. Software needs to add 1 to this value to get the correct period value. This field updates on the first rising edge of the fan tach input for every new window. TACH_FAN_TACH1_0 Offset: 0x4 Read/Write: RO Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,0000,0000,0000,0000) Bit Reset Description 23:0 0x0 HI: This field indicates the HIGH time (N-1) of the fan tach input in units of 1 micro-seconds of every fan tach monitor window. It is updated on the first rising edge of the fan tach input of every new window. TACH_FAN_TACH_UPPER_THRESHOLD_0 Offset: 0x8 Read/Write: R/W Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00ffffff (0bxxxx,xxxx,1111,1111,1111,1111,1111,1111) Bit Reset Description 23:0 0xffffff UPPER_THRESHOLD: For ERR_CONFIG=MONITOR_PERIOD - The threshold value has to be programmed in micro-seconds units For ERR_CONFIG=MONITOR_PULSES - The threshold value has to be programmed in terms of number of pulses
+
+Fan Tachometer Registers TACH_FAN_TACH_LOWER_THRESHOLD_0 Offset: 0xc Read/Write: R/W Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,0000,0000,0000,0000) Bit Reset Description 23:0 0x0 LOWER_THRESHOLD: For ERR_CONFIG=MONITOR_PERIOD - The threshold value has to be programmed in micro-seconds units For ERR_CONFIG=MONITOR_PULSES - The threshold value has to be programmed in terms of number of pulses TACH_FAN_TACH_INTERRUPT_ENABLE_0 Offset: 0x10 Read/Write: R/W Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,x000) Bit Reset Description 0x0 COUNTER_OVERFLOW: When enabled, an interrupt is asserted when OVERFLOW bit is set. By default the interrupt functionality is disabled and should be enabled by Software. 0 = DISABLE 1 = ENABLE 0x0 UNDERRUN: When enabled, an interrupt is asserted when UNDERRUN status is set. By default the interrupt functionality is disabled and should be enabled by Software after programming the lower threshold. 0 = DISABLE 1 = ENABLE 0x0 OVERRUN: When enabled, an interrupt is asserted when OVERRUN status is set. By default the interrupt functionality is disabled and should be enabled by Software after programming the upper threshold. 0 = DISABLE 1 = ENABLE TACH_FAN_TACH_CONTROL_0 Offset: 0x14 Read/Write: R/W Parity Protection: N Shadow: N
+
+Fan Tachometer Registers SCR Protection: 0 Reset: 0xffffff00 (0b1111,1111,1111,1111,1111,1111,xxxx,x000) Bit Reset Description 31:8 0xffffff MONITOR_TIME: Time in micro-seconds that the controller counts the incoming pulses and compares against UPPER_THRESHOLD/LOWER_THRESHOLD when time expires. This field is used when ERR_CONFIG=MONITOR_PULSES 0x0 ERR_CONFIG: Hardware can monitor the tach input and detect variation in RPM. This can be done in two ways: 1. MONITOR_PERIOD - Detect variation in RPM by monitoring the tach input period for the programmed win_length (absolute RPM monitor). MONITOR_PULSES - Detect variation in RPM by monitoring the tach input pulses (number of rising edges of tach input) for a programmed time (MONITOR_TIME). 2. In this configuration, Hardware does not wait for a tach pulse to be detected (average RPM monitor). 0 = MONITOR_PERIOD 1 = MONITOR_PULSES 0x0 STOP_ON_ERR: If stop_on_error field is set, Tach will wait until the interrupt is serviced and cleared by Software, else it will continue monitoring. 0 = DISABLE 1 = ENABLE 0x0 LOAD_CONFIG: Software is required to set this bit to 1 after programming the threshold values and ERR_CONFIG into respective registers. Setting the bit to 1 triggers Hardware to update the threshold values internally and reset the current counters. Hardware starts counting the period on the next pulse from fan when ERR_CONFIG = MONITOR_PERIOD or Hardware starts counting the pulses immediately when ERR_CONFIG = MONITOR_PULSES. Once the internal update is done, Hardware auto clears this bit. Since Hardware will be busy with internal update, Software should not write the threshold register or ERR_CONFIG again until this bit is cleared by Hardware. 0 = DISABLE 1 = ENABLE TACH_FAN_TACH_ERR_STATUS_0 Offset: 0x18 Read/Write: See table below Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,xxxx,xx00)
+
+Fan Tachometer Registers Bit R/W Reset Description 31:8 RO 0x0 ERR_PERIOD: ERR_CONFIG=MONITOR_PERIOD - Period value (N-1) in µs is captured when error is detected ERR_CONFIG=MONITOR_PULSES - Number of pulses are captured when error is detected RW 0x0 UNDERRUN: This field is set when the PERIOD value or the number of pulses is lower than or equal to programmed LOWER_THRESHOLD value. 0 = NO_UNDERRUN 1 = UNDERRUN RW 0x0 OVERRUN: This field is set when the PERIOD value or the number of pulses is greater than or equal to programmed UPPER_THRESHOLD value. 0 = NO_OVERRUN 1 = OVERRUN
+
+Safety 11. Safety
