@@ -1,0 +1,2 @@
+﻿## 6.75 GHz from 270 MHz (multiplier = 25). Can be used only if the eDP
+panel reports support for it in the DPCD registers. 18 = EDP_6_48GHZ: Selects the 6.48 GHz link clock; PLL generates

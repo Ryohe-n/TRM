@@ -1,0 +1,5 @@
+﻿## 3.1 Gen1 x1 port.
+For Type-A and Micro-AB connectors, VBus and ID pin detection are supported via an external PMIC; for Type-C connectors, CC pins detection and signal muxing are supported via an external port policy controller. For USB 3.2 Gen1 x1 Device Controller, the VBUS detection status is notified via software setting the status register bit in USB PAD Control logic.
+### 10.2.2 USB Functional Description
+#### 10.2.2.1 USB Controller
+Orin has an xHCI controller that supports the xHCI programming model for scheduling transactions and interface managements as a host that natively supports USB 3.2, USB 2.0, and USB 1.1 transactions with its USB 3.2 and USB 2.0 interfaces. The xHCI controller supports up to four USB

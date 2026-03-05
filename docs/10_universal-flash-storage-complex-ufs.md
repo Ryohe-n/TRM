@@ -1,0 +1,113 @@
+﻿## 10.3 Universal Flash Storage Complex (UFS)
+### 10.3.1 Overview
+Cluster is comprised of the following function blocks: A Universal Flash Storage Host Controller (UFSHC) A MIPI Unified Protocol (UniPro) interface controller Two MIPI M-PHY (MPHY) high-speed serial interfaces The UFS Complex can be operated in either single (x1) or dual (x2) lane configurations to support operations at HS-G1, HS-G2, HS-G3, and HS-G4 with both Rate A and Rate B speeds. The UFSHC connects two lanes of M-PHY Digital via the UniPro Link Layer; refer to the UniPro section of this document for more details. The following diagram shows the UFS Complex inside the High-Speed I/O (HSIO) Cluster sharing the 8-Lane UPHY (UPHY12) with three other HSIO Complexes, PCIe, and USB (for USB 3.0/3.1). Note that the MPHY blocks are a digital interface to the shared UPHY analog pads.
+
+Universal Flash Storage Complex (UFS)
+**Figure 10.12 UFS Complex inside HSIO Cluster**
+
+Universal Flash Storage Complex (UFS)
+**Figure 10.13 UFS Complex Top-level Diagram**
+#### 10.3.1.1 Standards and Compatibility
+Standards supported are: MIPI Alliance Specification for M-PHY, Version 4.1 MIPI Alliance Specification for UniPro, Version 1.8 JEDEC Standard: Universal Flash Storage (UFS), Version 3.0/3.1 - JESD220D/JESD220E JEDEC Standard: Universal Flash Storage Host Controller Interface (UFSHCI), Version 3.0 - JESD223D IP versions used are:
+
+Universal Flash Storage Complex (UFS) The UFSHC and UNIPRO blocks are Synopsys® IP version: 1.70a-GA
+#### 10.3.1.2 Relevant Chapters in the TRM
+Address Map Clock Controller and Reset (CAR) Control BackBone (CBB) Fuses High-Speed I/O Cluster (HSIO) MIPI M-PHY (MPHY) Multi-Purpose I/O Pins and Pin Multiplexing (PinMux) PCIe Complex (PCIe) Universal Flash Storage (UFS) Complex
+#### 10.3.1.3 Features
+UFSHCI v3.0 compliant unit 32 Transfer request slots and eight Task Management slots Max throughput 2334 MBps @ latency 2.3 µs for read and 1.2 µs for write @ LV/SS/25C, for G4x2 RATEB per direction LS-MODE PWM-G1~G4 (for x1 and x2 configurations) HS-MODE HS-G1~G4 (for x1 and x2 configurations) Tx polarity inversion supported via M-TX configuration attribute programming and Rx polarity inversion support via M-RX configuration attribute programming or auto detection (when enabled) LANE reversal supported via UniPro Clock gating M-PHY PLL power down as indicated by MPHY block Clock gating of UFS, Unipro and digital MPHY would be fully controlled by software with no inputs from hardware. UniPro Test Mode Support Reference clock frequency to UFS device
+## 19.2 MHz and 38.4 MHz; 19.2 MHz is default
+UFSHC wrapper supports TrustZone access control through APB bridge firewall Control for UFS Device reference clock enable Recommended NVIDIA defined AXI user fields UFS Boot support Supports UFS 3.0/3.1 devices
+
+Universal Flash Storage Complex (UFS) Supports IO virtualization MIPI UniPro v1.8 compliant MIPI MPHY v4.1 compliant
+### 10.3.2 Functional Description
+#### 10.3.2.1 Interface Components
+The figure below shows a system perspective of the UFS Complex covering the hierarchy of both hardware and software components that form the interface to the external UFS device.
+**Figure 10.14 UFS Interface System Overview**
+
+Universal Flash Storage Complex (UFS)
+#### 10.3.2.2 UFS Complex Interfaces and Internal Blocks
+##### 10.3.2.2.1 Memory Controller Interface
+UFS is a direct client of the Memory Controller in the SoC and uses an AXI interface for DMA requests and responses. A block referred to as AXICIF bridges from the AXI bus protocol to the internal protocol for memory controller clients.
+##### 10.3.2.2.2 APB Bridge
+An APB interface is supported by the UFSHC programming interface. UFS MMIO register access and UniPro register access are supported in UFSHC. UniPro registers are however not accessed directly, but through the UFS MMIO register (UICC registers) by using DME_SET and DME_GET operations.
+##### 10.3.2.2.3 CAR
+Refer to the Clock and Reset (CAR) Controller chapter, and associated software documentation, for the control interface for UFS clocks.
+##### 10.3.2.2.4 Arbiter
+To deliver optimal performance, the host controller’s initiator interface needs to perform transactions on the system bus without adding additional delays. The arbiter determines the order in which requests are being executed. This order inevitably has impact on the available bandwidth of the system. It is important to minimize the latency introduced by the access time behind a series of similar requests. For instance, a block of read or write requests, or a request stream with alternating types, like read followed by write, followed by read, and so on. The DMA engine is responsible for moving data between system memories without any interaction with the system host. The DMA engine also makes requests to the Arbiter for the AXI bus.
+##### 10.3.2.2.5 UTP Engine
+The UFS Transport Protocol (UTP) engine is responsible for managing the UFS protocol between the UFS host controller and the external UFS device. While UFS requests are sent to the UFS host controller core in a single command, they may trigger a series of UFS packets transferred between the host and external devices. The UTP Engine provides several different functions: Managing low-level UFS protocol between device and host Managing the response from the device and storing the appropriate driver-level information in system memory Triggering the DMA engine to fetch/store data
+
+Universal Flash Storage Complex (UFS) Managing scatter/gather table and setting up DMA engine accordingly Maximizing throughput by intelligent pre-fetching, buffering and pre-configuration Minimizing required bus bandwidth by reducing unnecessary bus activities
+##### 10.3.2.2.6 C-Port Adapter
+The C-Port adapter interfaces to the C-Port interface of the UniPro Transport layer and handles the C-Port protocol. The C-Port adapter does UPIU encapsulation and de-capsulation. UPIU does encapsulation in the following scenario 1. 2. 3. Raw data from system memory is encapsulated into DATA OUT UPIUs. UFS Task Management commands are converted into Task Management Request UPIUs. UFS Query commands are converted into Query Request UPIUs. UPIU does de-capsulation in the following scenario 1. 2. 3. 4. Raw data is extracted from DATA IN UPIUs. Status, Response, and Sense data are extracted from Response UPIUs. Service Response is extracted from Task Management Response UPIUs. Opcode-specific Field information is extracted from Query Response UPIUs.
+##### 10.3.2.2.7 UPHY Lane Configuration
+The 8-lane HSIO UPHY is shared between the high-speed I/O controllers of PCIe, UFS, XUSB, and HSSTP. The SoC supports lane mapping to allow the HSIO UPHY lanes to be configured as different I/O interfaces based on use cases. The HSIO UPHY with differential simplex (DS) lanes supports PCIe, USB 3.2, and UFS for normal operation and supports HSSTP for debug stream output. In these mapping options, Lane 6 and Lane 7 may be switched to be controlled by UFS in x2 connection and Lane 6 only in UFS x1 configuration. Fuse bits provide the information to the Software/Boot ROM about the given platform configuration for UFS, i.e., either x1 or x2. Lane configuration control is done in the UPHY pad macro mux control logic. The table below summarizes the UPHY12 configuration for UFS. Table 10.4 UPHY12 Configuration for UFS 2-Lane Configuration 1-Lane Configuration Lane 6 UFS x2 (UFS L0) UFS x1
+
+Universal Flash Storage Complex (UFS) 2-Lane Configuration 1-Lane Configuration Lane 7 UFS x2 (UFS L1) N/A The UFS Control sidebands, not requiring high-speed pads, are in the domain of Multi-Purpose I/O Pins. The UFSHC supports the following external sideband interfaces via PinMux. UFS_REF_CLK Single-ended reference clock from UFS Host Controller to device UFS_RST_n Single-ended active Low Reset signals from UFS Host Controller to device For details, see Multi-Purpose I/O Pins and Pin Multiplexing (PinMux) chapter.
+#### 10.3.2.3 UniPro
+UniPro is a link layer specification developed and supported by the MIPI alliance. It is intended to provide a low-latency and high-bandwidth "pipe" for applications that need a very high-speed interface with no compromise on reliability. The figure below shows a very high-level view of the UniPro layered structure.
+**Figure 10.15 UniPro Layered Structure**
+
+Universal Flash Storage Complex (UFS) The main features of the UniPro stack are listed below: MIPI UniPro-1.8 conformant MIPI M-PHY support (no support for D-PHY) Single C-Port Configurable device ID Automatic flow control between local buffer space and peer device (Layer 2 flow control) Reliable transmissions through error correction and automatic re-transmission Single Traffic Class (TC0) Supports two Rx and two Tx lanes. Generation and check of Layer 1.5 test pattern RMMI signaling support between L1.5 and the M-PHY
+##### 10.3.2.3.1 UniPro Lane Connectivity
+The figure below shows the connection of a UniPro link with two Rx and two Tx lanes. The UniPro protocol uses the unidirectional M-PHY connections to transport the data between the two UniPro devices using dual simplex connections. The figure below shows the connection diagram of a UniPro link from the Physical Adapter Layer of UniPro for forward and reverse direction. UniPro protocol requires feedback on the transmission status; for reverse direction UniPro link must have at least one lane in each direction. M-PHY modules drive the physical link. M-PHY modules convert the parallel data streams provided by UniPro into high-speed differential or low-speed PWM-like transmission.
+
+Universal Flash Storage Complex (UFS)
+**Figure 10.16 UniPro Lane Connectivity**
+##### 10.3.2.3.2 UniPro Layer Interaction
+The diagram below shows the four layers of UniPro, and the interaction of the different layers.
+
+Universal Flash Storage Complex (UFS)
+**Figure 10.17 UniPro Layer Interaction**
+##### 10.3.2.3.3 UniPro Key Layer Features
+L1.5 (PHY Adapter): Makes UniPro implementation agnostic to the PHY level (L1) implementation and protocol details Transmits and receives data and control 17-bit “symbols” Performs lane management L2 (Data Link): Provides reliable data transmission and reception (generates CRC) Provides Flow Control Initiates PHY interaction via L1.5 Supports traffic classes TC0 and TC1 (TC1 support not required for UFS application) Performs frame composition (Tx) and decomposition (Rx) Provides frame preemption support (Not required for UFS application) Detects Errors and reports errors to DME L3 (Network): Performs Packet composition and decomposition Supports Error handling Supports at least one traffic class
+
+Universal Flash Storage Complex (UFS) Device ID support in Network Layer L4 (Transport): Provides addressing, segment composition and decomposition Provides End-to-End flow control and Error handling L4 (Transport layer) signaling interface UniPro specification defines a C-Port interface for higher level applications to interface to the Transport Layer C-Port addressing support in L4 (Transport layer).
+#### 10.3.2.4 MPHY
+MPHY connects to UniPro via the standard Reference M-PHY Module Interface (RMMI) for Tx and Rx.
+### 10.3.3 Programming Guidelines
+#### 10.3.3.1 Fuse Programming
+Refer to the Fuses chapter in this TRM. There are four shared ODM-specific fuse bits (i.e., board dependent calibration) in a mutually exclusively manner by enabling only one of the HSIO Complexes sharing the same UPHY Lanes. These four ODM bits are included in the fuse register FUSE_MPHY_ODM_CALIB_0. The two LSB's are used by boot before accessing the BCT. MPHY_ODM_CALIB[1:0] of FUSE_MPHY_ODM_CALIB_0 adjusts M-PHY pad TX_DRV_AMP, TX_DRV_POST, and RX_CTLE to compensate for different trace lengths. Table 10.5 Fuse Programming Based on FUSE_MPHY_ODM_CALIB_0[1:0] Value Register Field Value DYN_CTL_1 TX_DRV_AMP_SEL0 8h DYN_CTL_1 TX_DRV_AMP_SEL1 12h DYN_CTL_1 TX_DRV_AMP_SEL2 8h DYN_CTL_1 TX_DRV_AMP_SEL3 16h DYN_CTL_2 TX_DRV_AMP_SEL4 8h DYN_CTL_2 TX_DRV_AMP_SEL5 11h DYN_CTL_2 TX_DRV_AMP_SEL6 8h
+
+UFS Registers Register Field Value DYN_CTL_2 TX_DRV_AMP_SEL7 11h DYN_CTL_3 TX_DRV_AMP_SEL8 8h DYN_CTL_3 TX_DRV_AMP_SEL9 11h DYN_CTL_4 TX_DRV_POST_SEL0 0h DYN_CTL_4 TX_DRV_POST_SEL1 Ah DYN_CTL_5 TX_DRV_POST_SEL2 Fh DYN_CTL_5 TX_DRV_POST_SEL3 8h DYN_CTL_5 TX_DRV_PRE_SEL3 8h FUSE_MPHY_ODM_CALIB_0[3:2] are reserved for other board dependent calibrations. The SoC's BPMP firmware handles all Fuse Programming.
+### 10.3.4 UFS Registers
+Refer to "Reading Register Tables" in the Introduction chapter for the register table protocol as well as recommendations for accessing registers. The Base Addresses of the following registers are specified in the Address Map section of the TRM. UFSHC_AUX_UFSHC_AUX_AXI_CTRL_0_0 Offset: 0x0 Read/Write: See table below Parity Protection: N Shadow: N Secure: Trust Zone Protected SCR Protection: 0 Reset: 0x00000003 (0b0000,0000,0000,0000,0000,0000,0000,0011) Bit R/W Reset Description 31:2 RO 0x0 UFSHC_AXI_RESERVED0 RW 0x1 UFSHC_AXI_AWPROT RW 0x1 UFSHC_AXI_ARPROT UFSHC_AUX_UFSHC_AUX_AXI_CTRL_1_0
+
+### OCR (Page 9831) ~~~text Technical Reference Manual
+UFS Registers
+Register Field Value
+DYN_CTL_2 TX_DRV_AMP_SEL7 11h
+DYN_CTL_3 TX_DRV_AMP_SEL8 8h
+DYN_CTL_3 TX_DRV_AMP_SEL9 11h
+DYN_CTL_4 TX_DRV_POST_SELO Oh
+DYN_CTL_4 TX_DRV_POST_SEL1 Ah
+DYN_CTL_5 TX_DRV_POST_SEL2 EA
+DYN_CTL_5 TX_DRV_POST_SEL3 8h
+DYN_CTL_5 TX_DRV_PRE_SEL3 8h
+FUSE_MPHY_ODM_CALIB_O[3:2] are reserved for other board.dependent calibrations.
+The SoC's BPMP firmware handles all Fuse Programming;
+10.3.4 UFS Registers
+Refer to "Reading Register Tables" in the Introduction chapter for the register table protocol as well
+as recommendations for accessing registers. The Base Addresses of the following registers are
+specified in the Address Map section of the TRM.
+UFSHC_AUX_UFSHC_AUX_AXI_CTRL,0_0O
+Offset: OxO
+Read/Write: See table below
+Parity Protection: N
+Shadow: N
+Secure: Trust Zone Protected
+SCR Protection: 0
+Reset: Ox00000003 (O0b0000,0000,0000,0000,0000,0000,0000,001 1)
+Bit R/W Reset Description
+31:2 RO OxO UFSHC_AXI_RESERVEDO
+1 RW Ox1 UFSHC_AXI_LAWPROT
+0) RW Ox1 UFSHC_AXI_ARPROT
+UFSHCSAUX_UFSHC_AUX_AXI_CTRL_1_0 ~~~
+
+UFS Registers ARCACHE: Program this field to set the CACHE field of AXI read request from UFSHC. AWCACHE: Program this field to set the CACHE field of AXI write request from UFSHC. Offset: 0x4 Read/Write: See table below Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000003 (0b0000,0000,0000,0000,0000,0000,0000,0011) Bit R/W Reset Description 31:10 RO 0x0 UFSHC_AXI_RESERVED1 RW 0x0 UFSHC_AXI_IO_WR_COHERENCY: Coh_IO_acc should be driven directly from UFSHC RW 0x0 UFSHC_AXI_IO_RD_COHERENCY: Coh_IO_acc should be driven directly from UFSHC 7:4 RW 0x0 UFSHC_AXI_AWCACHE 3:0 RW 0x3 UFSHC_AXI_ARCACHE UFSHC_AUX_UFSHC_SW_EN_CLK_SLCG_0 Following register values are hardcoded as per bug description Offset: 0x8 Read/Write: R/W Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0000,0000) Bit Reset Description 0x0 UFSHC_PCLK_OVR_ON: Software programmable force enable for clock ufshc_pclk 0x0 UFSHC_RX_SYMBOLCLKSELECTED_CLK_OVR_ON: Software programmable force enable for clock RX_SymbolClkSelecetd 0x0 UFSHC_TX_SYMBOL_CLK_OVR_ON: Software programmable force enable for clock TX_SymbolClk 0x0 UFSHC_CG_SYS_CLK_OVR_ON: Software programmable force enable for clock ufshc_cg_sysclk 0x0 UFSHC_CLK_T_CLK_OVR_ON: Software programmable force enable for clock Clk_T 0x0 UFSHC_LP_CLK_T_CLK_OVR_ON: Software programmable force enable for clock LP_Clk_T
+
+UFS Registers Bit Reset Description 0x0 UFSHC_HCLK_OVR_ON: Software programmable force enable for clock HClk 0x0 UFSHC_CLK_OVR_ON: Master override signal for all SLCGs UFSHC_AUX_UFSHC_RX_SYMBOLCLK_CG_DELAY_0 Offset: 0xc Read/Write: R/W Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000010 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0001,0000) Bit Reset Description 7:0 0x10 UFSHC_RX_SYMBOLCLK_CG_DELAY_COUNT UFSHC_AUX_UFSHC_STATUS_0 Offset: 0x10 Read/Write: RO Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00) Bit Reset Description 0x0 UFSHC_LP_RESET_COMPLETE_STATUS: Status Register for LP reset complete information 0x0 UFSHC_HIBERNATE_STATUS: Status register for LP_pwr_gate UFSHC_AUX_UFSHC_DEV_CTRL_0 UFSHC Device clock and reset control Offset: 0x14 Read/Write: R/W Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+
+UFS Registers Bit Reset Description 0x0 UFSHC_DEV_RESET: Software enabled device reset for UFSHC 0x0 UFSHC_DEV_CLK_EN: Software enabled device clock enable for UFSHC UFSHC_AUX_UFSHC_MPHY_MTD_MRD_OVRD_CTRL_0 UFSHC MPHY MTD and MRD override control Offset: 0x18 Read/Write: R/W Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000030 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11,0000) Bit Reset Description 0x1 UFSHC_MPHY_DIFN_DRIVE_EXTEND_EN_1: UFSHC-MPHY DIFN_DRVE extend MPHY-1 0x1 UFSHC_MPHY_DIFN_DRIVE_EXTEND_EN_0: UFSHC-MPHY DIFN_DRVE extend MPHY-0 0x0 UFSHC_MPHY_MRD1_PWRENB_OVRD: UFSHC to MPHY MRD1 power enable override 0x0 UFSHC_MPHY_MRD0_PWRENB_OVRD: UFSHC to MPHY MRD0 power enable override 0x0 UFSHC_MPHY_MTD1_PWRENB_OVRD: UFSHC to MPHY MTD1 power enable override 0x0 UFSHC_MPHY_MTD0_PWRENB_OVRD: UFSHC to MPHY MTD0 power enable override UFSHC_AUX_UFSHC_CARD_DET_LP_PWR_CTRL_0 Offset: 0x1c Read/Write: R/W Parity Protection: N Shadow: N SCR Protection: 0 Reset: 0x00000005 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,x101) Bit Reset Description 0x1 UFSHC_LP_PWR_RDY_SW_CTRL: UFSHC POWER READY SIGNAL Software control 0x0 UFSHC_LP_ISOL_EN_SW_CTRL: UFSHC LP_ISOL_EN Software control
+
+MIPI M-PHY Bit Reset Description 0x1 UFSHC_CARD_DETECT_SW_CTRL: UFSHC CARD Detect Software control
