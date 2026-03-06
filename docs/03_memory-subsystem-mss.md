@@ -1,0 +1,21790 @@
+﻿# 3 Memory Subsystem (MSS)
+
+## 3.1 Memory Subsystem (MSS)
+### 3.1.1 Overview
+The Memory Subsystem (MSS) provides support for:
+- Access to LPDDR5 DRAM attached to the SoC
+- Access to on-chip SysRAM
+A SyncPoint interface for inter-processor signaling
+- Full-speed I/O coherence by routing requests through a scalable coherence fabric
+A comprehensive set of safety and security mechanisms. Structurally, the MSS consists of six major components: 1.
+- MSS Data Backbone - routes requests from clients to the MSS Hub and responses from MSS
+Hub to the clients.
+- MSS Hub - receives and arbitrates among client requests, performs System Memory
+- Management Unit (SMMU) translation, and sends requests to the Memory Controller Fabric
+(MCF). NVLink Hub - provides the connection to the iGPU.
+- MCF - performs security checks, feeds I/O coherent requests to the Scalable Coherence
+Fabric (SCF), and directs requests to the multiple memory channels. Memory Controller (MC) Channels - contain the row sorter/arbiter and DRAM controllers. DRAM I/O - contains the channel-to-pad fabric, DRAM I/O pads, and PLLs. 2. 3. 4. 5. 6.
+- The NVIDIA® Orin™ MSS is designed to support LPDDR5 DRAM memory with up to a 256-bit bus
+width. It handles requests from a wide variety of clients, supporting their bandwidth, latency, quality-of-service needs, and special ordering requirements. MSS supports address translation for clients that use virtual addresses.
+
+- Memory Subsystem (MSS)
+#### 3.1.1.1 Features
+Key features include:
+- Up to 256-bit wide memory interface supporting LPDDR5 DRAM with sixteen x16 DRAM
+channels
+- High-bandwidth interface to the integrated NVIDIA Ampere Architecture GPU (NVLink3
+- NCISOC interface)
+- Full-speed I/O coherence with bypass for Isochronous (ISO) traffic
+- Can be configured as 128-bit (east/west or south); or 256-bit (full configuration)
+40 (39) bit virtual address
+- Up to 128GB external DRAM
+- On-chip static RAM, referred to as SysRAM (512 KiB)
+- AON TZ-SRAM
+- System Memory Management Unit (SMMU) for address translation based on the Arm
+- SMMU-500
+- Independent SMMU for ISO clients
+- Phase-aware DRAM timers
+- Memory protection table for iGPU and NVLInk interfaces
+- High-bandwidth PCIe ordered writes
+- DRAM encryption
+- DRAM ECC (stored in memory in-line with data)
+- PCIe MSI support
+- Functional Safety Island
+42 generalized security carveouts
+- The block diagram in the Introduction chapter shows where the MSS fits in the overall SoC
+architecture.
+
+- Memory Subsystem (MSS)
+#### 3.1.1.2 Block Diagram
+**Figure 3.1 MSS Block Diagram**
+
+- Memory Subsystem (MSS)
+#### 3.1.1.3 Speeds and Feeds
+There are complex bandwidth requirements with requests from:
+- SoC clients
+iGPU and memory destinations:
+- DRAM
+- SCF Cache
+- SysRAM
+- AON TZ-SRAM
+Local DRAM bandwidth (up to 256 bits of LPDDR5 @ 6.4Gbps) gives a peak DRAM bandwidth of up to 205 GB/sec. The SCF cache has additional bandwidth that can be used by GPU when SCF allocation is enabled. The main datapaths through MCF and SCF support up to 8*32B*scfclk = 273 GB/sec in both read and write directions.
+### 3.1.2 Functional Description
+#### 3.1.2.1 MSS Data Backbone
+Clients connect using an AMBA AXI bus Socket interface to an AXI Client Interface (AXICIF) in the client partition. One or more AXICIFs connect to a Partition Client (PC) Interface, which connects the clients to a Tier Snap Arbiter (TSA) network, which provides a shared wiring path to the client hubs. Clients may directly connect to a client hub as well. The Data Backbone supports requests from 32B to 256B in size.
+#### 3.1.2.2 Client Hubs
+There are eight client hub instances:
+- Four unordered hubs (Hub0/Hub1 and Hub2/Hub3) that get transactions from clients that
+require no request ordering.
+- One ordered hub (Hub4) that gets transactions from clients that require WAW request
+ordering.
+- Three Qual Engine (see Memory Qualification Engine below) hubs (Hub5-7) with a
+single Qual Engine as client and no TBUs, which allow the Qual Engines in aggregate, to saturate DRAM. 1. 2. 3.
+
+- Memory Subsystem (MSS)
+**Figure 3.2 Client Hub Block Diagram**
+- Unordered requests arriving on the TSA chain are connected to either the Hub0/1
+pair or the Hub2/3 pair. They are steered to the even or odd hub in the pair using an address-hash- based steering function. The nominal interleave between hubs is 1 KiB. Ordered requests are steered to Hub4 (to the ordered hub).
+- The figure below shows the overall hub topology
+
+- Memory Subsystem (MSS)
+**Figure 3.3 MSS Hub Topology**
+Each client hub contains the following significant modules:
+- PCFIFO interlock for each client interface
+- Bandwidth throttle DDA
+- Mem Qual engine
+- TBUs with wrapper logic (for SMMU translation–not present in the Qual Engine hubs)
+- Hierarchical ring arbiter
+- Hub throttling logic
+##### 3.1.2.2.1 PCFIFO Interlock
+The PCFIFO interlock associated with each client interface provides ordering for low bandwidth ordered clients. When the interlock for a client is enabled, the interlock logic stores the upper address bits down to the channel interleave (which is either 512B or 1KB) and other attributes such as StreamID. When a new client request strides outside a 512B or 1KB (configurable) region or has differences in another tracked attribute the new request is stalled until all outstanding write requests have completed. Since the memory system provides ordering for requests from a client to a 512B or 1KB region, this ensures the clients’ writes are committed in order. For more details and caveats see the section on Transaction Ordering below.
+##### 3.1.2.2.2 Bandwidth Throttle DDA
+Each client interface is equipped with a DDA that can cap the bandwidth requested by a client. This may be used to prevent certain oversubscription problems.
+
+- Memory Subsystem (MSS)
+##### 3.1.2.2.3 Memory Qualification Engine
+The Memory Qualification Engine (Qual Engine, MemQual or MIU) is a distributed synthetic load generator. It supports full DRAM bandwidth (256B per dbbclk) for either reads or writes. Its main purposes are to: 1. Provide a unit that can generate memory qualification request streams at full bandwidth that is easy to set up and use
+- Debug memory stability issues
+- Initialize ECC regions
+- Perform silicon measurement and memory performance testing
+- Validate SysRAM performance
+- Safety testing (only performed by MIUs with an SMMU)
+2. 3. 4. 5. 6. The Qual Engine contains pattern generators for addresses, data, byte enables; and configuration registers to specify stride, accesses per activate, request rate, read-write burst length, etc. It integrity-checks returning read data and reports when errors are detected. It has an address-as- data mode, which can be used for address aliasing checks. The Qual Engine has eight interfaces, each providing:
+- Read interface (one read per dbbclk)
+- Write data interface (32B per dbbclk)
+- Read response interface (64B per dbbclk)
+- Write ack response interface (one write ack per dbbclk)
+The request interfaces connect to Ring 2 of each of the eight client hubs. Three of the hubs have
+- Qual Engine as their only client. Qual Engines on these hubs have no access to SMMU
+translation. Each response interface connects to one response chain.
+##### 3.1.2.2.4 TBUs with Wrapper Logic
+- Translation Buffer Units (TBUs) are the Translation Lookaside Buffers of the Arm SMMU-500
+(described below). They cache full translations and perform virtual to physical translation on incoming requests. Wrapper logic converts MSS control flags into ACE-Lite controls supported by Arm and implements overrides for many parameters. A bypass path around the TBUs is provided for clients that use physical addressing.
+- Multiple TBU instances are used in each MCHub to support the necessary bandwidth. The non-
+ordered hubs have four non-ISO TBUs and some have two ISO TBUs. Requests from a given client are distributed over the appropriate set of TBUs using an address-hash-based steering function. The ordered hub has four TBUs of smaller size. Translation requests that miss at a TBU are sent to its attached TCU in the common hub. TLB invalidations are forwarded to the TBUs from the TCUs.
+
+- Memory Subsystem (MSS)
+##### 3.1.2.2.5 Hierarchical Ring Arbiter
+In each client hub, arbitration of requests is done in several “rings.” The outermost ring (Ring 2) arbitrates between NISO and Soft ISO traffic/clients. Ring 1 arbitrates between ISO and real-time clients (together with the Ring 2 output). The Ring 1 output is sent to the TBUs. SMMU outputs (including the bypass path) are arbitrated in Ring 0.5. Outputs of the Ring 0.5 are sent to MCF. Ring 2 and Ring 1 are priority tier snap arbiters that provide bandwidth-guarantees using a Digital Differential Analyzer (DDA) mechanism. They also support dynamic masking of arbiter inputs based on the number of outstanding transactions below.
+##### 3.1.2.2.6 Hub Throttling Logic
+To prevent hubs from issuing requests that exceed response bandwidth, each client hub has a configurable DDA at its output that can throttle the bandwidth of read requests.
+##### 3.1.2.2.7 Common Hub
+The Common Hub contains hub logic for which there is only one copy. It contains the following major blocks: 1. 2.
+- TCUs and NVCaches
+- ECC Scrubber
+In addition, it contains common logic, including the timestamp counter, used to generate deadlines for client requests, and the aggregator for SMMU/hub interrupts.
+##### 3.1.2.2.8 TCU
+Each TCU is backed by an instance of NVCache (or NV$), whose purpose is to reduce page-walking traffic to DRAM. A TCU contains: MacroTLB - which is a large backup TLB that backs up the smaller TLBs in the TBU units. The MacroTLB is configured to the maximum possible size (4096 entries, each storing one PTE). Page Table Walk Cache - which caches partial table walks. Page Walk logic - which walks the stage 1- and stage 2-page table structures as needed.
+- Each TCU has input buffering to absorb the maximum of 16 requests outstanding from each
+TBU connected, stores them internally, and then does the required walks for the requests after arbitration. Each TCU can have up to 32 requests outstanding to NV$/DRAM. The peak rate for TCU hits is one per four clocks and the peak rate for TCU misses is one per five clocks (assuming a simple last-level PTE miss--if complex page walks are required, the rate can be much lower).
+
+- Memory Subsystem (MSS)
+##### 3.1.2.2.9 NVCache
+NVCache (or NV$) is an auxiliary cache that stores arrays of PTEs or PDEs that are fetched to satisfy TCU miss requests. NV$ lines are 64B, which store eight PTEs or PDEs and provides a form of prefetch, unlike TBU and TCU, which cache and request individual PTEs. NV$ is an out of order cache; it can return hits immediately while prior misses are still outstanding. Misses to DRAM are returned in order to TCU.
+##### 3.1.2.2.10 ECC Scrubber
+ECC protection requires a way of fixing single-bit errors that can accumulate over time before any of them become unrecoverable multi-bit errors. Errors can occur in any portion of memory, which might otherwise be subject to security restrictions. There is a hardware-scrubber unit to meet these needs. Under software control, the scrubber inserts a write request with byte enables off to a designated address into the pipe. RMW logic in the Memory Controller Channel does a read, which corrects the data, followed by a write of the corrected data plus newly computed ECC bits. Scrubber requests use the direct path to the channels, and not the IO-coherent path through SCF.
+#### 3.1.2.3 Arm SMMU-500
+The SoC uses Arm SMMU-500 IP blocks (TBU and TCU) encapsulated in NVIDIA-designed wrappers. Refer to the System Memory Management Unit chapter of this document for more details.
+- Five Translation Cache Units (TCUs) are located in the Common Hub. They handle translation
+requests input from the Translation Buffer Units (TBUs) in the client hubs (the Qual Engine hubs do not support SMMU translation). To improve performance, an additional NVIDIA-designed NVCache (NV$), associated with each TCU, caches the eight PTEs (64B) returned from memory each time a TCU miss goes out to memory. Two TCUs, with associated TBUs and NVCaches, form a logical SMMU, serving non-ISO clients on each of the two unordered hub pairs. A dedicated fifth TCU, with associated TBUs and NVCache, serves ISO clients. It is anticipated that both non-ISO TCUs serving a single hub pair have the context registers programmed identically, but TCUs on different hub pairs and the ISO TCU could support disjoint contexts. Invalidations of TLB and cache entries at TCU, TBU, and NVCache are performed by software using register writes to the respective TCU(s). TCUs in turn send invalidation messages to their attached TBUs and they also send bulk invalidation requests to their respective NVCaches (the entire NV$ is invalidated at any TCU invalidation). Invalidations for non-ISO contexts must only be sent to the non-ISO TCUs. This is to prevent non-
+- ISO invalidations from affecting ISO performance. Hardware DVM-based invalidations are not
+supported to the SMMU, although DVM is used for inter-CPU-cluster page-table invalidations.
+
+- Memory Subsystem (MSS)
+The TCU configuration is 128 contexts for all TCUs (NISO and ISO). This is the largest SMMU-500 configuration supported. Each of the two pairs of NISO TCUs can be independently programmed.
+- Note that NISO TCUs 0 and 1 must be programmed identically and NISO TCUs 2 and 3 must be
+programmed identically. NISO TCUs 0, 1 may be programmed differently from NISO TCUs 2, 3, as long as each pair of TCUs serves a disjoint set of clients.
+#### 3.1.2.4 NVLink Hub (Connection to the iGPU)
+- The Ampere iGPU connects to the memory subsystem using eight NCISOC ports. NCISOC is the
+on-chip version of the NVLink protocol used to connect GPUs. Each link provides approximately 35 GB/s of raw bandwidth in each direction and approximately 25 GB/sec achievable bandwidth in each direction. GPU requests may be IO coherent. Requests can be 32B, 64B, 96B, 128B, or 256B. If 256B, there can be no byte enables.
+- Each NCISOC port connects to the memory subsystem through one of eight NVLink Hubs. NVLink
+Hub contains logic to do the following: Convert from NCISOC protocol to the ACE-Lite format used within the memory subsystem. Provide response buffering for GPU responses. Implement barriers to allow hazard-free updates of the protection table.
+##### 3.1.2.4.1 Read-Modify-Write (RMW) Transactions
+NCISOC supports a RMW command that may be used to implement coherent platform atomics. The read transaction is initiated by the GPU and is conveyed on the NCISOC request interface (REQ virtual channel, RMW command). The response goes back to the imitating unit (GPU L2), which performs the operation, then issues a TRANS_DONE command that conveys the write data to memory. SCF implements the RMW protocol, which requires locking a cache line until TRANS_DONE is received.
+#### 3.1.2.5 MSS Clients
+The following clients have memory interface(s) in the SoC and connect to the HUBs (excludes dGPU/iGPU/QualEngine).
+- AON-DMA
+- AON-R5
+- APE-DSP
+- APE-DMA
+- AXIAP (DFD)
+- AZA-HDA
+- BPMP-DMA
+
+- Memory Subsystem (MSS)
+- BPMP-R5
+- DCE-DMA/DCE-R5
+Engine with minimal bandwidth requirements that is configured as SISO.
+- DLA
+- DLA-Falcon
+- EQOS
+- ETR (DFD)
+- Functional Safety Island (FSI)
+- An independent, redundant set of processors with onboard memory that is used as a
+monitoring and safety processor working beside other SoC engines without requiring an external functional safety processor. It has its own power rail and clocks to be maximally independent of other SoC components.
+- This safety processor must meet strict safety requirements, which requires high fault
+coverage internally and, also on the external memory interface. The memory subsystem does not meet these metrics. FSI can therefore operate in two modes:
+- Safety mode. This is done when accessing the FSI ASIL-D carveout. Both FSI0 and FSI1
+ports are used and CRC values are read/written in addition to data. SMMU is bypassed (using StreamID 0x7f).
+- Normal mode. This is done when accessing outside the FSI ASIL-D carveout. Only the FSI0
+ports are used. CRC values are not used. SMMU is enabled.
+- The FSI ports are normal, low-bandwidth non-ISO clients with no special QoS
+requirements. They connect to Ring 2, which allows them to be configured as NISO or SISO.
+- GPCDMA
+- HOST1X
+- HWPM_PMA
+HWPM_PMA is the write client for the HWPM (hardware performance monitor) unit.
+- ISP
+- ISP-Falcon
+- MGBE
+MGBE are multi-gigabit ethernet clients that are configured as SISO.
+- NVDISPLAY
+The GPU NVDisplay 4.0 client is used, which makes 128B requests in batches of two. In block linear mode, it uses XBAR_RAW. To avoid changes in MSS Hub logic, a disp2dbb shim splits 128B display requests into a pair of 64B requests with AXI_aruser_user_size == 128B, matching the AXI socket protocol used by other clients. This shim then connects to AXICIF, like other MSS clients.
+
+- Memory Subsystem (MSS)
+- NVDISPLAY-NISO
+- NVDisplay 4.0 contains an NVDISPLAY-NISO client, which is used for configuring display
+header frames. NVDISPLAY-NISO issues reads and writes to the memory system for semaphores, notifiers, and push-buffers. NVDISPLAY-NISO has minimal bandwidth requirements.
+- NVDEC
+- NVENC
+- NVJPG
+- OFA-DMA
+Optical Flow Accelerator (OFA) is a client that is configured as SISO and used independently of NVENC.
+- PCIe
+- PSC
+- PVA
+- PVA-Falcon
+- QSPI
+QSPI has minimal bandwidth requirements and is configured as SISO.
+- RCE-DMA
+- RCE-R5
+- SCE-DMA
+- SCE-R5
+- SDMMC
+- SE
+- TSEC
+- UFSC
+- VI-Falcon
+- VI
+- VIC
+- XUSB-DMA
+- XUSB-HOST
+#### 3.1.2.6 MCF
+MCF is the internal Memory Controller Fabric. MCF contains four MCF slices plus the crossbars that route requests between client hubs and NVLinkHub to the MCF/SCF slices, and to the channels and other memory destinations (SysRAM and Syncpoint registers).
+
+- Memory Subsystem (MSS)
+#### 3.1.2.7 SCF
+The Scalable Coherence Fabric (SCF) contains coherence logic and the SCF cache, as well as the interface to CCPLEX. SCF is part of the CCPLEX cluster and is coupled with MCF and conveys MSS traffic.
+#### 3.1.2.8 SysRAM
+- SysRAM is an on-chip RAM managed by software, intended to provide memory for boot, power
+management, TrustZone (TZ), and interprocessor communication (IPC). SysRAM is potentially usable by other applications as a fast, low-latency, low-power alternative to DRAM. Boot requires an internal RAM to store data used to initialize the chip before DRAM is available. This RAM needs to be directly accessible by the boot processor (the BPMP) and all boot I/O storage devices (for example, Flash controller or USB controller). The boot I/O device transfers encrypted boot data directly to the internal RAM as one of the first steps during boot. The SysRAM characteristics are: A size of 512 KiB. A low access latency for boot speed. Direct access from the I/O clients to SysRAM. During the initial portion of boot, CCPLEX power management needs a protected region in SysRAM. This area can be freed before the completion of boot. To set up this "pre-boot" aperture, the BPMP initializes one of the GSCs to set up an aperture that allows read/write access to only CCPLEX power management.
+- The SoC has many CPU cores and auxiliary processors, which have pair-wise communication
+requirements. All IPC communication buffers are in DRAM. Post-boot, SysRAM is exclusively used for the MCE GSC (MCE private code and workspace). SysRAM has its own aperture in physical address space, distinct from the DRAM aperture, and is available to all DRAM memory clients. Initialization is done by a dedicated state machine, which is started by writing to a trigger register. Any accesses that occur before initialization is complete are back-pressured (no SysRAM requests are dropped). Software is responsible for allocating SysRAM for each use case.
+##### 3.1.2.8.1 Bandwidth
+The maximum SysRAM bandwidth is 32B per SCF clock for each of the two instances, or up to 64.2 GB/s aggregate (SCF clock = EMC clock with a max of 1066 MHz). Most SysRAM clients use a small fraction of the maximum bandwidth so their requirements are easily met. The most important aspect of bandwidth is the interaction of SysRAM and DRAM accesses and the effects on DRAM bandwidth and ISO N% values. If SysRAM is oversubscribed, HOL blocking can occur, limiting DRAM
+
+- Memory Subsystem (MSS)
+bandwidth. SysRAM bandwidth must be limited to 13 GB/sec or about 10% of DRAM bandwidth to prevent HOL blocking DRAM.
+#### 3.1.2.9 SyncPoint Interface
+- The SyncPoint Interface or Side Band Shim (SBS) presents a memory-mapped aperture to MSS
+clients, converting reads and writes to this aperture to syncpoint operations at Host1x. The SyncPoint interface converts read requests to SyncPoint reads and write requests to SyncPoint INCR operations at Host1x. For SyncPoint reads of any size, Host1x returns a 32b read response of SyncPoint value. MSS replicates these 32b to the width of the read response and returns the replicated value back to the client. For writes to the SyncPoint aperture, the data payload of the request does not matter, and is not passed from MSS logic to Host1x. There are no restrictions on the size of reads or write requests. Any sized read or write request to the aperture results in a request to Host1x. SyncPoint writes with zero byte enables are ignored. Each of the 1K SyncPoints has a 64 KiB address range assigned to it in the SyncPoint aperture, so that each may be controlled by a 64 KiB hypervisor page-table entry. The SyncPoint aperture is 64MB long and starts at a 64MB aligned base address. In other words, PA[25:16] of the address is used as the SyncPoint index.
+- The SyncPoint interface does not have any additional security mechanisms other than normal
+page-table protections provided by the SMMU or/and GMMU. SyncPoint requests are expected to be MMU-translated in the same manner as other requests to MSS.
+#### 3.1.2.10 Memory Controller (DRAM) Channels
+- The SoC has 16 Memory Controller channels, each controlling a x16 LPDDR5 channel, together
+implementing a 256-bit DRAM I/O interface. The channel logic is divided into four sections. CIFLL, WCAM, and Row Sorter represent the “MC” portion, while the final section is EMC and contains DRAM control, ECC, and Encryption logic.
+##### 3.1.2.10.1 CIFLL
+- CIFLL is the interface unit between MCF and the row sorter. It includes input FIFOs, async
+crossings, DRBC conversion, encryption key ID lookup, stat range comparison, and Ring 0x/Ring 0, which implement the final ring arbitration.
+
+- Memory Subsystem (MSS)
+##### 3.1.2.10.2 WCAM
+WCAM is the point of global visibility for the memory subsystem. Write requests are acknowledged at WCAM, even though the writes may not be committed to DRAM until later. WCAM tracks pending writes so it can apply them to subsequent reads to the same address. WCAM stores the write data for writes that are being arbitrated. It has associative lookup logic to locate in-flight write data associated with any read that is scheduled. WCAM also implements the read-modify- write required for ECC and Encryption.
+##### 3.1.2.10.3 Row Sorter/Arbiter
+- The row sorter/arbiter takes a stream of requests from WCAM in bank queues and produces a
+DRAM-efficient and latency-sensitive stream of activate, read, write, and out of order per-bank refresh commands. The MC row sorter also handles All-Bank-Refresh, Refresh Management for Row Hammer (RFM) and power-down-modes (ACPD and DSR). Periodic calibrations are also now in the mcclk domain with an ownership arbiter that decides between periodic calibration commands and normal row sorter arbitration.
+##### 3.1.2.10.4 EMC
+EMC maps the stream of activate, read, write, and refresh commands from the Row Sorter into actual DRAM commands. In addition, it handles maintenance operations such as power-down and periodic training. It also contains the decryption and ECC blocks for response data.
+#### 3.1.2.11 Addressing
+##### 3.1.2.11.1 40 (39)-bit Virtual Addressing
+SoC clients provide 40 bits of address at the AXI interface. Bit 39 is used to indicate conversion between TEGRA_RAW and XBAR_RAW block linear sector ordering. Therefore, a 39-bit virtual address space is supported. The Arm SMMU supports a 49-bit input virtual address. The top 10 SMMU virtual address input bits are driven to zero in the SMMU wrapper. If all 39 virtual address bits are used, the page table can be three levels deep, making worst-case TLB misses expensive (and bad for ISO). To reduce the overhead of page table walks, software only instantiates the number of levels needed for the maximum VA allocation for the context. In many cases, this should be under 1 GB (30 bits), which requires only a two-level table. 1 level 2 MB (2 ^ (12 + 9)) 21 bits 2 level 1 GB (2 ^ (12 + 2 * 9)) 30 bits 3 level 512 GB (2 ^ (12 + 3 * 9)) 39 bits
+
+- Memory Subsystem (MSS)
+##### 3.1.2.11.2 128GB Maximum DRAM Size
+A maximum attached DRAM size of 128GB is supported. Since the 0-2GB physical address range is dedicated to MMIO, DRAM starts at 2GB, so the physical address range for DRAM is from 2GB to 130GB. Additional details:
+- Because the GPU has only 37 physical address bits available (0-128GB range), GPU can only
+access 126GB of DRAM. In 128GB DRAM configs, it is recommended that software place carveouts and service buffers that do not need access by GPU in the 128-130GB physical address range.
+- When ECC is enabled, the maximum addressable DRAM size is 112GB, since 1/8 of memory is
+dedicated to ECC storage. In this configuration, GPU can access all available DRAM. 128-bit DRAM configurations are limited to 64GB (56GB when ECC is enabled).
+##### 3.1.2.11.3 StreamID Specification of Context and Virtual Machine ID
+- The Arm SMMU uses a StreamID field, associated with each request, to specify which Address
+Space ID (ASID) and associated context, and which Virtual Machine ID (VMID) to use. The StreamID field at the client interface is 8-bits wide. Only 128 StreamIDs are supported, so StreamID[7] is ignored. StreamID is programmed into client registers by the hypervisor (or by boot code in non-hypervisor systems) and conveyed to MSS over the client’s AXI interface. MSS additionally provides a per- client pair of registers that can be programmed to override the client-provided StreamID value with a value from the registers. The main intention for these registers is to provide StreamID values for clients with no internal support for StreamID. The OVERRIDE_ADD mode enables the display client to output a window ID field on the StreamID interface and have that added to the base StreamID value in the StreamID override register, so that each display window is effectively a separate virtual client.
+#### 3.1.2.12 Address-based Steering
+##### 3.1.2.12.1 DRAM Channel Steering
+- Steering of requests to logical DRAM channels is determined by the
+- MC_EMEM_ADR_CFG_CHANNEL_MASK_* registers. The following equation determines the logical
+channel: logical_chan[3:0] = chan[3:0] & (num_channels-1), where chan[0] = ^(EMEM_ADR_CFG_CHANNEL_MASK_0_EMEM_CHANNEL_MASK[31:9]&addr[31:9]) chan[1] = ^(EMEM_ADR_CFG_CHANNEL_MASK_1_EMEM_CHANNEL_MASK[31:9]&addr[31:9]) chan[2] = ^(EMEM_ADR_CFG_CHANNEL_MASK_2_EMEM_CHANNEL_MASK[31:9]&addr[31:9])
+
+- Memory Subsystem (MSS)
+chan[3] = ^(EMEM_ADR_CFG_CHANNEL_MASK_3_EMEM_CHANNEL_MASK[31:9]&addr[31:9]) 512B versus 1 KiB interleave is determined as follows: interleave_512B = EMEM_ADR_CFG_CHANNEL_MASK_0_EMEM_CHANNEL_MASK[9] |
+- EMEM_ADR_CFG_CHANNEL_MASK_1_EMEM_CHANNEL_MASK[9] |
+- EMEM_ADR_CFG_CHANNEL_MASK_2_EMEM_CHANNEL_MASK[9] |
+- EMEM_ADR_CFG_CHANNEL_MASK_3_EMEM_CHANNEL_MASK[9];
+The recommended settings of the registers are the following:
+- Channels
+- Interleave
+- EMEM_ADR_CFG_CHANNEL_MASK_* registers
+512B
+- MASK_0: 32’b 0010 0111 1010 1111 0101 001x xxxx
+xxxx
+- MASK_1: 32’b 0101 0110 0011 1100 1010 010x xxxx
+xxxx
+- MASK_2: 32’b 0011 1111 0010 0110 0100 100x xxxx
+xxxx
+- MASK_3: 32’b 1110 0010 0100 0100 0011 000x xxxx
+xxxx 1 KiB
+- MASK_0: 32’b 0010 0111 1010 1111 0100 010x xxxx
+xxxx
+- MASK_1: 32’b 0101 0110 0011 1100 1010 100x xxxx
+xxxx
+- MASK_2: 32’b 0011 1111 0010 0110 0101 000x xxxx
+xxxx
+- MASK_3: 32’b 1110 0010 0100 0100 0010 000x xxxx
+xxxx 8,4 512B
+- MASK_0: 32’b 1011 1001 0100 1111 0101 001x xxxx
+xxxx
+- MASK_1: 32’b 1100 1010 1110 0100 1010 010x xxxx
+xxxx
+- MASK_2: 32’b 0010 1110 0111 0110 0100 100x xxxx
+xxxx 8,4 1 KiB
+- MASK_0: 32’b 1011 1001 0100 1111 0100 010x xxxx
+xxxx
+- MASK_1: 32’b 1100 1010 1110 0100 1010 100x xxxx
+xxxx
+- MASK_2: 32’b 0010 1110 0111 0110 0101 000x xxxx
+xxxx For there to be no aliasing of memory addresses (that is, two physical addresses mapping to the same DRAM location), the mask bits that correspond to the channel bits in the physical address must allow all channels to be selected. Normally this is done by having a unique chan_base bit set in each mask register. For simplicity in the reverse mapping, we require this for legal settings of the mask registers. For best performance, the channel mask registers should be programmed with optimized settings given above.
+
+- Memory Subsystem (MSS)
+##### 3.1.2.12.2 DRAM Bank Steering
+- Steering of requests to DRAM banks (within a device within a channel) is determined by the
+- MC_EMEM_ADR_CFG_BANK_MASK_{0,1,2,3} registers. The following equation determines the
+bank: bank[0] = ^(EMEM_ADR_CFG_BANK_MASK_0_EMEM_BANK_MASK[31:10] & xaddr[31:10]) bank[1] = ^(EMEM_ADR_CFG_BANK_MASK_1_EMEM_BANK_MASK[31:10] & xaddr[31:10]) bank[2] = ^(EMEM_ADR_CFG_BANK_MASK_2_EMEM_BANK_MASK[31:10] & xaddr[31:10]) bank[3] = ^(EMEM_ADR_CFG_BANK_MASK_3_EMEM_BANK_MASK[31:10] & xaddr[31:10]) The variable xaddr is the physical address with the channel bits right-shifted out as follows: 4-channel mode: xaddr[31:10] = (addr[33:12] >> 2) 8-channel mode: xaddr[31:10] = (addr[34:13] >> 3) 16-channel mode: xaddr[31:10] = (addr[35:14] >> 4) Note that in a 16-bank LPDDR5 systems with four bank groups, bank[3:2] select the bank group and bank[1:0] select the bank within bank group. The recommended settings of the registers are the following: 8 banks
+- Channels
+- Interleave
+- EMEM_ADR_CFG_BANK_MASK_* registers
+4, 8, 16 512B, 1 KiB
+- MASK_0: 32’b 0101 1100 1010 0111 1000 01xx xxxx
+xxxx
+- MASK_1: 32’b 1110 0101 0111 0010 0100 10xx xxxx
+xxxx
+- MASK_2: 32’b 1001 0111 0011 1011 1011 00xx xxxx
+xxxx
+- MC_EMEM_ADR_CFG_BANK_MASK_0=0x5CA78400
+- MC_EMEM_ADR_CFG_BANK_MASK_1=0xE5724800
+- MC_EMEM_ADR_CFG_BANK_MASK_2=0x973BB000
+16 banks
+- Channels
+- Interleave
+- EMEM_ADR_CFG_BANK_MASK_* registers
+4, 8, 16 512B, 1 KiB
+- MASK_0: 32’b 1011 0101 0111 1010 1111 10xx xxxx
+xxxx
+- MASK_1: 32’b 0101 1111 1010 1101 1010 01xx xxxx
+xxxx
+- MASK_2: 32’b 1101 0001 1001 1110 0110 00xx xxxx
+xxxx
+- MASK_3: 32’b 1111 0010 0110 1011 0001 00xx xxxx
+xxxx
+
+- Memory Subsystem (MSS)
+- MC_EMEM_ADR_CFG_BANK_MASK_0=0xB57AF800
+- MC_EMEM_ADR_CFG_BANK_MASK_1=0x5FADA400
+- MC_EMEM_ADR_CFG_BANK_MASK_2=0xD19E3000
+- MC_EMEM_ADR_CFG_BANK_MASK_3=0xF26B1000
+For there to be no aliasing of memory addresses (that is, two physical addresses mapping to the same DRAM location), the mask bits that correspond to the bank bits in the physical address must allow all banks to be selected. Normally this is done by having a unique bank bit set in each mask register. For simplicity in the reverse mapping, we require this for legal settings of the mask registers. For best performance, program the channel mask registers with the optimized settings given above.
+##### 3.1.2.12.3 iGPU NVLink Steering
+Incoming iGPU requests are steered to one of the iGPU NVLink interfaces based upon an address hash determined by the GPU. The nominal interleave is 256B. Responses are routed to the NVLink interface that originated the request.
+#### 3.1.2.13 Virtual Channels
+Virtual channels allow independence and differentiated quality of service (QoS) for multiple logical streams that share a common physical channel.
+##### 3.1.2.13.1 Virtual Channels for Quality of Service
+The SoC has a robust mechanism to provide QoS to the different traffic classes. The major traffic classes are described below:
+- Isochronous (ISO). Clients have fixed latency requirements and specified bandwidth that is
+provided within a time horizon of hundreds of nsec (display and camera). Bandwidth disruptions for system events like DVFS and system training are provisioned for with appropriate buffering. Data is needed in the required time or pixels are dropped.
+- Soft ISO (SISO). Clients have fixed bandwidth requirements within a time horizon of
+milliseconds. Stalls are allowed within this time period so long as the specified bandwidth is provided for a specified minimum fraction of each period (for example, NVDEC, NVENC, and PVA). Processing for a frame must be completed within the frame time or frame is dropped. Non-ISO (NISO). Best-effort service. Faster is better, but there is no hard deadline and no guarantees.
+- Low-latency (LL). Client performance depends on lowest possible latency (for example,CPU
+reads).
+- Low-latency SISO (SISO_LL). This is used for NISO page-table misses and Cortex-A9 CPU
+reads. The requests are SISO, but latency is critical to meet the clients’ performance
+
+- Memory Subsystem (MSS)
+requirements. SISO_LL is a hybrid: SISO_LL requests travel on the ISO VC from hubs through MCF but split into their own VC in the channel.
+- The ISO and SISO virtual channels are “provisioned,” meaning that under normal conditions
+requests launched into the virtual channel proceed to the memory channel (or final destination) without backpressure, thus should traverse the MSS pipeline with relatively low latency. The NISO virtual channel is “unprovisioned” meaning that when DRAM (or final destination) is oversubscribed, requests can back up and fill the virtual channel. The latency under these conditions can be high— it is a function of the load issued by all the clients. Thus, in a case in which clients may saturate DRAM, the NISO virtual channel is only suited to “best effort” service. The ISO virtual channel is special in that all interactions with the other virtual channels and other uncontrolled sources of stalls are avoided so that latency is predictable. Ring 1 and Ring 2 DDA settings are used to prioritize ISO over other VCs and SISO over NISO above the TBUs. There are dedicated ISO SMMU TBUs to prevent SMMU slowdowns from other VCs from affecting ISO. VCs are provided from clients, through hubs, MCF, and SCF to Ring 0 at each Memory Controller Channel. The Ring 0 arbiter arbitrates between the head of each VC as it selects requests for the row sorter. At that point, row sorter priorities and deadlines determine which order requests are satisfied.
+##### 3.1.2.13.2 Virtual Channels to Prevent Deadlock
+Two additional virtual channels are needed to remove dependencies between streams of requests that can cause deadlock:
+- TRANS_DONE to convey the RMW completion signal from GPU L2 to SCF. Without this
+additional virtual channel, the TRANS_DONE command could be blocked behind a request waiting for the RMW to complete, causing deadlock. The four main virtual channels (NISO, SISO, ISO, CPU_LL), are conveyed to the DRAM channels, where they get resolved. This is done in a dual-level ring structure: Ring 0x followed by Ring 0.
+#### 3.1.2.14 Arbitration, Throttling, and Deadlines
+Arbitration, throttling, and deadlines are used to improve QoS for clients. The goals are to:
+- Provide clients with required bandwidth
+- Improve utilization by preventing congestion
+- Reduce client latency and limit latency outliers
+
+- Memory Subsystem (MSS)
+##### 3.1.2.14.1 Priority Tier Snap Arbiter (PTSA/DDAs)
+DRAM utilization can vary depending on the characteristics of the request stream and can pause for periodic training, refresh, etc. Certain clients and traffic streams have bandwidth requirements that the system must satisfy despite the variable DRAM utilization. Bandwidth guarantee logic at the snap arbiter inputs is included. The bandwidth guarantee logic uses a DDA mechanism along with dynamic masking of the inputs to the snap arbiter. For each input at any snap arbiter ring, provide the following control, state, and I/O. Note that signed (two's complement) fixed-point arithmetic is used for the bandwidth calculations, using N integer bits (including sign) and F fraction bits. For this SoC, the values are N=11 and F=12.
+- Name
+- Control, state, I/O
+- Fixed pt format
+(#int bits. #frac bits)
+- Description
+request input -
+- Request is present at the arbiter input
+grant input -
+- Request was granted last cycle
+high_priority output -
+- Request grants are behind the
+guaranteed rate rate control 0.F
+- Amount to increment accum every
+clock. accum state N.F
+- Accumulates number of grants “owed” to
+this arbiter input; a negative value indicates that the input has had more grants than its guarantee max control N.0
+- Maximum value of accum allowed
+min control N.0
+- Minimum value of accum allowed
+(normally negative) grant_decrement global control 1.F
+- Amount to subtract from accum every
+clock that a grant occurs. This is a global config value that is used for all DDAs. Each clock cycle, the following computation is done for each snap arbiter input: high_priority = (accum >= 0.0); accum = accum + rate; if (grant) accum = accum – grant_decrement; if (accum > max) accum = max; if (accum < min) accum = min; If any snap arbiter input has a non-zero value for (high_priority and request), that is if high priority and at least one of its slots has a valid request, then we AND the snap arbiter request inputs with a mask where the mask value is the input’s high_priority signal (the input’s high_priority is used as a mask for all the input’s requests). If no input has a non-zero value for (high_priority and request),
+
+- Memory Subsystem (MSS)
+then there is no masking of the snap arbiter inputs. Thus, any inputs that are “behind” are handled in the next snap arbiter round while inputs that are not behind are excluded. DDAs are provided on the Ring 2 and Ring 1 snap arbiter rings in the client hubs, within SCF at merge points between CPU and DMA traffic, and Ring 0 and Ring 0x in the Memory Controller Channels.
+- Frequency versus Use-case Programming of Registers
+Software usually requires that a given register must be owned by a single driver. The clocks driver is responsible for registers that depend on frequency and the client/ISO manager drivers are responsible for registers that depend on use case. Therefore, display and other ISO clients whose bandwidth demands are constant regardless of clock frequency, rate, minimum, and maximum, are programmed by the display driver.
+- Display and other ISO client DDA rates are typically programmed to provide the appropriate
+bandwidth for a given use case at maximum mcclk/emcclk/scfclk with grant_decrement = 1 at this maximum frequency. At lower clock frequencies, rather than increasing each input’s rate parameter (which would require control of the rate registers by multiple drivers), the clocks driver changes the global grant_decrement value instead. Clients whose bandwidth should scale down at lower clock frequencies (such as CPU) have their rate programmed by the clocks driver as well, so it scales down with frequency. In general, a given client is categorized either as a use-case- dependent client or a frequency-dependent client, which dictates whether the client driver or clocks driver owns the client’s DDA register. The grant_decrement register is shadowed so it can be automatically updated when a frequency change occurs. For example, the CPU’s rate needs to scale down with EMCCLK so it does not overwhelm the available bandwidth.
+##### 3.1.2.14.2 Request Throttling
+Throttling of requests is an important way to prevent congestion and saturation by low priority requests. For regions of the design in which there are no VCs (for example the output Ring 1), local throttling is used to prevent low priority VCs from head-of-line blocking high-priority VCs.
+- Hub Partition Client Bandwidth Throttling
+This limits the bandwidth consumed by a single partition client. A bandwidth throttle is provided at each partition client, which operates similarly to the DDAs at the ring arbiters that guarantee bandwidth, only these throttles cap bandwidth. Each clock cycle, an accumulator is incremented by a client-specific rate increment that corresponds to a 64 byte transfer. Simultaneously, if the partition client receives a grant from the ring arbiter, the accumulator is decremented by a globally configured grant decrement value. Requests from a partition client to the arbiter are masked if the accumulator value is negative.
+
+- Memory Subsystem (MSS)
+Since a client will not receive any further grants once its request is masked, the lowest possible value for the accumulator is the grant decrement value.
+- Hub Output Throttling to Prevent Response Path Backpressure
+The response paths from MCF to the client hubs have limited bandwidth – less than full DRAM bandwidth. Arbitration inefficiencies at the MCF output response crossbar can further reduce bandwidth on each of these paths to about 90% of the theoretical response bandwidth. If 1) clients make large requests or, 2) if the input request crossbar selects requests from a hub that exceed the response bandwidth to that hub, persistent backups can occur at the output response crossbar through the MCF/SCF response pipeline, all the way back to the channels. Since the response paths have no virtual channels, priority responses (e.g., ISO SMMU page-table-misses) can be trapped and delayed. Also, if the input request crossbar chooses requests from a hub at a higher rate than the responses can be delivered, the backpressure reduces the rate the row sorters can schedule requests, reducing DRAM bandwidth.
+- Ring 0/Ring 0x Throttling
+- Ring 0 and Ring 0x have DDAs at each input, which provides bandwidth control under most
+circumstances. The input request stream at Ring 0 additionally needs throttling to prevent the row sorter from filling with low priority requests (which could head-of-line block high-priority ISO requests) and to prevent CPU requests, which normally get high priority, from starving SISO and NISO.
+##### 3.1.2.14.3 Latency Allowance and Deadlines
+The Memory Subsystem supports clients with different latency requirements. The architecture achieves this by calculating a deadline for each request as it enters the memory subsystem and then prioritizing requests that reach their deadline and have not been serviced. When all requests are within their deadline, the arbiter grants requests to maximize efficiency (Efficiency Arbitration Mode). If any request(s) have reached their deadline, the arbiter operates in Latency Arbitration Mode, giving high priority to the expired request(s). For a variety of reasons, an expired request may not be able to be granted immediately. Here are several definitions that are useful in the explanations: Expiration Time. The time between a request reaching its deadline and the time it is granted by the arbiter. Latency Tolerance. The latency a client can tolerate while running at its design bandwidth. This may be governed by a) the size of internal latency buffers within the client or b) the size of the client’s MCCIF response buffer (which needs to be large enough to store all the client’s requests outstanding in the memory controller). The latency allowance should be less than the Latency Tolerance, minus the expected Expiration Time and minus pipeline latencies not accounted for in the latency allowance, to avoid stalling the client.
+
+- Memory Subsystem (MSS)
+- Bandwidth-disruption time. The time service at a channel may be disrupted for infrequent
+events, such as frequency changes, periodic training, ZQ Calibration, and so forth.
+- Deadline Computation
+When a request is stored in the partition client (PC) FIFO, a deadline is computed for it. The deadline is computed by adding the latency allowance (LA) of the issuing client to the current timestamp. The LA is programmable on a per-client basis. Slack is defined as:
+- Slack = Deadline – Timestamp
+Negative slack means the request has been pending in the Row Sorter for longer than its latency allowance and should receive latency-mode arbitration. Modular arithmetic is used to handle timestamp wraparound. To decouple the concept of time in the Row Sorter from the clock period of the MCCLK, the units of deadlines, LAs, timestamps, and slack are all stored in units of ticks. A tick is the wall-clock granularity; nominally 30ns. There are configuration variables to tell the TIMER unit how to translate MCCLK cycles into the appropriate timestamp increments for the current clock- frequency.
+- Determining the Latency Allowance
+NVIDIA determines the latency allowance setting for each client. These values are programmed into registers that determine the deadline for client requests. In many cases, the latency allowance is statically programmed. In some cases, it must be dynamically programmed based on client bandwidth and/or memory clock frequencies. When latency allowance is exceeded, the request expires. Requests are expected to be granted within the expiration time. Thus, the latency expected a given request to achieve is given by: target_latency = latency_allowance + expiration_time + static_latency_minus_snap_arb_to_row_sorter This target_latency should match expected_latency in the following Little’s Law equation: latency_buffer_size = design_bandwidth * expected_latency Combining the equations, setting expected_latency = target_latency and latency_buffer_size = mccif_size, design_bandwidth = client_bandwidth, and solving for latency_allowance, results in the following: latency_allowance = mccif_size / client_bandwidth
+- static_latency_minus_snap_arb_to_row_sorter
+- expiration_time
+The following table shows the terms in static_latency_minus_snap_arb_to_row_sorter.
+
+- Memory Subsystem (MSS)
+- Table 3.1 Terms in static_latency_from_snap_arbiter_to_row_sorter
+- Static latency AXI to TBU input
+scfclk
+- Static latency from WCAM to RespXbar
+mcclk
+- Static Latency from RespXbar to client
+197.2 scfclk Expiration time is the time between a request expiring and being serviced under normal conditions while the DRAMs are active. This includes the tick granularity, time to finish processing another active list, time to switch from a different direction or rank, precharge, and activate time, and so on. There is also additional time to service one other request that may have expired at the same time (more than this is relegated to bandwidth disruption time). The following table provides the expiration time calculation for LPDDR5.
+- Table 3.2 Expiration Time Calculation
+- Parameter
+- LPDDR5
+ns dramclks
+- RCD
+7 txns
+- W2P
+turn Penalty (hidden behind w2p)
+- RCD
+- TA catchup
+- RAS
+- Total
+Different latency allowance rubrics are used for: 1. 2. 3. 4. bandwidth-soak read clients low-latency CPU read clients
+- ISO read clients (i.e., display)
+write clients The rules are programmed by the NVIDIA driver based in information provided from an API.
+- Latency Allowance for Bandwidth-Soak Read Clients
+
+- Memory Subsystem (MSS)
+Bandwidth soak clients use the above equation and assume that client_bandwidth is 85% of the peak_dram_bw. The LA for NISO read clients at peak dramclk frequency is 41 tickets; for SISO clients it is 37 tickets.
+- Note that client_bandwidth, unloaded_latency_minus_snap_arb_to_row_sorter, and
+expiration_time are all functions of clock frequency. For highest accuracy, perform this calculation for each set of operating frequencies. However, since the frequency-dependent terms are roughly inversely proportional to dramcclk frequency and, assuming the various clock frequencies in the MSS pipeline roughly scale with each other, the latency allowance is estimated at a given frequency by: latency_allowance = target_latency_allowance (at base_freq)
+- (base_freq / emcclk_freq)
+At low frequencies, the latency allowance can be larger than the maximum value allowed by the register field and so capped at this maximum value (255 ticks, where a tick is 30 nsec). Since latency_allowance for bandwidth soak clients depends on frequency, the values must be updated when a frequency change occurs. The proper values are programmed by emc_reg_calc.h. Note that this equation does not take into account large latency disruptions caused by infrequent events (also called bandwidth disruption events).
+- Latency Allowance for CPU Read Clients
+Because CPU reads are latency-critical, the latency allowance needs to be short. The default is 4 ticks (120 ns), but the high-priority CPU request feature can drop it to 0 ticks for designated requests.
+- Latency Allowance for ISO Read (i.e., display) Clients
+Display clients differ in several significant ways from the non-ISO clients: 1.
+- Non-ISO clients can tolerate occasional bandwidth disruptions or excess-latency events;
+average throughput is what matters. Display clients can tolerate occasional bandwidth disruptions as long as there is enough data prefetched and buffered in the mempool to tolerate the bandwidth disruption; display clients must not underflow.
+- Display’s internal latency tolerance is limited only by the number of queued up read
+responses in its internal mempool buffer. The memfetch unit and display itself independently track progress through the frame. Memfetch greedily requests all the pixels required for a frame, subject only to back-pressure from MSS and isohub clock. The datapath portion of display reads pixels from the response buffer in raster order at the required rate. There is no internal buffer connecting memfetch and display proper that limits display’s latency tolerance. 2. Display’s internal mempool is used to tolerate: Total latency, which includes display internal latency, MSS static latencies + drain time of a saturated row sorter
+- Bandwidth disruption events
+
+- Memory Subsystem (MSS)
+- DVFS events
+- Blocklinear SMMU miss period buffering
+- Fetch amortized buffering
+Display’s MCCIF buffer is used to tolerate static latencies and all the usual dynamic latencies incurred during steady state operation of the memory subsystem (notably not bandwidth disruption or DVFS events). The considerations for determine display latency allowance are complex and are encapsulated in NVIDIA software.
+- Latency Allowance for Write Clients
+Because of the WCAM, the latency allowance for write clients is greatly simplified which required quick scheduling of writes so that write acknowledges could be returned. Once a request has passed the WCAM, even for a low-latency client like CPU, the contents of the write are globally visible. The scheduling of the write can be done to facilitate DRAM efficiency without direct impact on the client. It is desirable to have a high latency allowance for writes, so the row sorter has flexibility in when to schedule writes and there is time for multiple write requests to the same page to arrive and be processed together. The disadvantage to a long latency allowance for writes is that a large fraction of the row sorter may be tied up with writes and unavailable for buffering reads so that reads can be done efficiently. The latency allowance equation for writes is: latency allowance (emcclk) = min(255, 128*(1066 MHz/emcclk)) The deadline determined at the hub is ignored and all write requests are re-deadlined with LA
+- MC_LATENCY_ALLOWANCE_CIFLL_WR_0 (0x3ff) at the channel. Direct turn arbitration generally
+determines when writes are scheduled. Write scheduling is determined by direction turn arbitration, not deadline expiration. The large LA of 1023 ticks ensures that writes do not remain in the row sorter for an excessive time.
+#### 3.1.2.15 Logical Transaction Pipeline
+Requests enter and pass through the memory system in a logical pipeline and are distributed over memory-system components. These requests can spend differing amounts of time, may be steered to different paths, and potentially may be reordered. Client attributes may be modified at certain stages. The following table lists the stages in the logical pipeline for SoC clients. NVLink requests merge into the pipeline at the input request XBar in MCF and share the remainder of this pipeline. Two paths to DRAM memory are available: the non-coherent path, and the path through SCF which supports I/O coherence. Requests to SCF may (or may not) snoop the CPU caches
+- Table 3.3 Logical Transaction Pipeline
+- Location
+- Operation
+- Controlling Register(s)
+- Effect
+
+- Memory Subsystem (MSS)
+- Client
+- Interface
+- Receive
+transaction
+- AXICIF
+- MemType
+override <C>_MEMTYPE_OVERRIDE
+- SO_DEV=(AxCache==0bxx0x), may be overridden
+based on register setting.
+- AXICIF
+- HubID
+determination <MC>_HUB_MASK <C>_NORMAL_HUBID_OVERR
+- IDE
+<C>_NORMAL_HUBID <C>_SODEV_HUBID
+- Determine HubID using address-based hash or
+override value.
+- PCFIFO
+- PCFIFO
+interlock
+- PCFIFO_<C>_ORDERED_CLIE
+- NT
+- Conditionally stalls transactions until conflicting prior
+transactions have completed.
+- PCFIFO
+- Large read
+request coalescing
+- MC_COALESCE_CTRL_0
+- MC_CLIENT_COALESCE_CON
+- FIG_*
+<C>_COALESCER_ENABLED
+- Whether to coalesce identified sequences of 64B read
+requests into large read requests.
+- Ring 1/Ring
+- Virtual channel
+determination <C>_TRAFFIC_TYPE_CONFIG
+- Identify client as ISO, SISO, NISO
+- TBU
+- Wrapper
+- AXI ID override
+<C>_AXI_ID_OVERRIDE
+- Conditionally overrides AXI ID
+- TBU
+- Wrapper
+- NS, STREAMID
+override <C>_NS_OVERRIDE <C>_STREAMID_OVEERIDE
+- Conditionally overrides NS flag and Stream ID
+- TBU
+- Wrapper
+- TBU steering
+control
+- SMMU_BYPASS_CTRL
+<C>_TBU_MASK <C>_NORMAL_TBUID _OVERRIDE <C>_NORMAL_TBUID <C>_SO_DEV_TBUID
+- Determine TBU ID (or TBU bypass)
+- TBU
+- Wrapper
+- SMMU steering
+control
+- SMMU_CLIENT_STEERING_CT
+- RL
+<C>_SMMU_STEERING_CTRL
+- Select between ISO and NISO SMMU
+- TBU
+- Wrapper
+- Translation to
+- ACE-Lite
+- AXI fields and per-translation flags mapped to ACE-
+Lite fields (AxCACHE, AxDOMAIN).
+- AxDOMAIN forced to System Shareable (0b11) for
+SO_DEV requests per AMBA specification.
+- TBU
+- Wrapper
+- Preserve
+- SO_DEV
+through SMMU
+- MC_TBU_TRANSACTION_ATT
+R_CTRL
+- TBU_SO_DEV_ATTR_PRESERV
+E
+- Whether to preserve upstream SO_DEV attribute
+through SMMU (default) or reset it based on AxDomain in PTE.
+- TBU
+- Translation
+- TBU page table entries and/or
+internal registers
+- Addresses transformed from virtual to physical. PTE
+values determine or modify various transaction attributes.
+- Request
+- Coloring
+- Block (RCB)
+- Barrier
+processing
+- Consumes barrier request from TBU, sets CNTR_ID
+attribute, tracks transactions by color, provides barrier response to TBU.
+- Client Hub
+- AXI to MCF
+command mapping Map AXI to MCF commands.
+
+- Memory Subsystem (MSS)
+- Client Hub
+- Coherent
+steering and snoop control <C>_COH_PATH_OVERRIDE_
+- NORMAL
+<C>_COH_PATH_OVERRIDE_S O_DEV order_id
+- SCF routing decision and conditional override of snoop
+bit.
+- Client Hub
+- Order ID and
+sequence_num generation
+- MC_CLIENT_ORDER_ID
+<C>_ORDER_ID
+- Select order_id for ordered write clients and attach
+sequence_num for ordered streams
+- MCF
+- Slice
+determination
+- CHANNEL_MASK_*
+Map transaction to one of four MCF/SCF slices.
+- SecChk
+- Error checks
+E.g., EMEM_BOM,
+- EMEM_SIZE, SYSRAM_BOM,
+- SYSRAM_TOM, GSC and VPR
+checks, etc.
+- Various error checks NISO_REMOTE requests that
+DECERR map to NISO VC.
+- Coherent
+path
+- SCF
+- SNOC / URT
+interlock
+- Various
+- Enforces ordering for ordered threads and same-
+address ordering.
+- SCF
+- Coherence
+fabric
+- Various
+- Requests with dependencies (on snoops or pending
+transactions) may be stalled. Transactions may be merged or satisfied by SCF cache according to transaction rules.
+- SCF
+- Channel
+determination
+- SCF version of
+- CHANNEL_ENABLE,
+- CHANNEL_MASK_*
+- SCF has its own copy of these registers for requests
+originated from CCPLEX.
+- Memory
+- Destination
+(DRAM,
+- SysRAM,
+- SyncPoint)
+- Completion
+- Various
+- Transactions are completed according to Memory
+- Destination ordering rules. ECC and/or encryption may
+be applied.
+- SCF
+- Read response
+reordering
+- Various
+- Responses to different addresses may be reordered by
+the coherence fabric.
+- SCF
+- WrAck
+reordering
+- ORDER_ID_*
+- WrAcks for ordered clients are processed in full or
+partial order at URT. WrAcks may be reordered after URT.
+- MCCIF
+- Response
+reordering Responses are returned to SoC clients in order.
+- Noncoher
+ent (direct) path
+- MCF
+- Channel
+determination
+- CHANNEL_ENABLE,
+- CHANNEL_MASK_*
+- Determine channel
+- Memory
+- Destination
+(SCF cache,
+- DRAM,
+- SysRAM,
++SyncPoint)
+- Completion
+- Various
+- Transactions are completed according to Memory
+- Destination ordering rules. ECC and/or encryption may
+be applied.
+
+- Memory Subsystem (MSS)
+- MCCIF
+- Response
+reordering Responses are returned to SoC clients in order.
+#### 3.1.2.16 Transaction Ordering
+Clients differ in their ordering and bandwidth requirements. The AXI interface provided at the client/MC boundary provides a general framework for expressing ordering. Some clients are not equipped to express their ordering requirements using AXI, so configuration registers are provided to specify ordering behavior for these clients.
+##### 3.1.2.16.1 Normal MSS Clients
+The DMA fabric treats all clients except NVLink and PCI ordered clients as normal clients. Normal MSS clients use the AXI ordering model for Normal memory by default. MSS provides the following ordering guarantees to each normal MSS client. 1.
+- Read responses are returned in the same order that requests were received at the input to
+the DMA fabric regardless of the AXIID, even though AXI only requires this for requests using the same AXIID. a.
+- Reads can get data from younger writes since AXI places no ordering dependencies
+between reads and writes. 2. Write acknowledges are returned in the same order that the writes were received at the input to the DMA fabric regardless of the AXIID. a.
+- Writes can be completed in any order by the DMA fabric, but the write acknowledges
+always return in order even though AXI only requires this for requests using the same AXIID. WrAck guarantees that all previous writes are globally visible.
+##### 3.1.2.16.2 PCI Ordered Clients
+For PCI-ordered clients such as PCIe, XUSB, and AZA_HDA, each IP is responsible for all PCI ordering requirements except for write after write (WAW) ordering. WAW ordering for these clients is the responsibility of both the client and the DMA fabric. MSS clients are not allowed to send a mixture of SO/DEV requests and Normal requests. The DMA fabric does not provide read after read ordering for any clients. SO/DEV reads requests are treated as Normal non-cacheable reads.
+##### 3.1.2.16.3 High Bandwidth PCI Ordered Clients
+High-bandwidth PCI-ordered writes use the SCF-interlock. The ordering interlock is implemented in SCF’s SNOC – a point where latencies are shortest since all interlock latencies are within one module. It directs full ordered bandwidth to one slice at a time. Each slice is provided with elasticity above and below the interlock to provide smooth bandwidth above and below the interlock.
+
+- Memory Subsystem (MSS)
+To use the high-bandwidth ordered architecture, client and software configuration must do the following: Client must connect to the ordered hub. If native AXI client: Client uses Device memory type. Client sets AXI ID to a constant value (e.g., 0). If legacy MCCIF client: Set AXI_ID_OVERRIDE to CGID_ZERO. All clients: Use MEMTYPE_OVERRIDE to force the MemType to Device. Set SO_DEV_HUBID to the appropriate value for the client. Set SO_DEV_TBUID to the appropriate value for the client. Disable the PCFIFO interlock for the client by programming the client-specific field in the MC_PCFIFO_CLIENT_CONFIG* register to UNORDERED. Set TRAFFIC_TYPE_CONFIG to NISO. Set ORDER_ID to one of ORD_1, ORD_2, or ORD_3. MSS hub configuration should steer requests to SCF. Requests are directed to an MCF slice using an address-based hash.
+##### 3.1.2.16.4 Low Bandwidth PCI Ordered Clients
+Low-bandwidth PCI ordered clients can use any client hub. They use the PCFIFO interlock during boot and use the high-bandwidth interlock afterwards. Client and software configurations must do the following:
+- Client normally connects to the ordered hub but may connect to an unordered hub (for
+example, if client requires ordering during boot but not during normal operation) If native AXI client: Client uses Device memory type. Client sets set AXI ID to a constant value (e.g., 0). If legacy MCCIF client: Set AXI_ID_OVERRIDE to CGID_ZERO. All clients: Use MEMTYPE_OVERRIDE to force the MemType to Device. Set SO_DEV_HUBID to the appropriate value for the client.
+
+- Memory Subsystem (MSS)
+Set SO_DEV_TBUID to the appropriate value for the client.
+- Enable the PCFIFO interlock for the client by programming the client-specific field in the
+MC_PCFIFO_CLIENT_CONFIG* register to ORDERED.
+- TRAFFIC_TYPE_CONFIG may be programmed to NISO
+- Set ORDER_ID to ORD_0 in the MC_CLIENT_ORDER_ID* register
+Requests are directed to an MCF slice using an address-based hash.
+- Requests can be routed through either the SCF or the MCF bypass path, using one of the
+methods of specifying snooping/coherent routing. Ordered clients that need fast ordered writes must use the SCF path. Any client that consumes a buffer generated by an ordered client that wrote through SCF and depends on the ordering behavior must also use the SCF path.
+#### 3.1.2.17 Error Checking and Reporting
+There are multiple classes of errors that are detected by the system, as shown below. Containable means unrelated parts of the system may continue running while the affected client or subsystem is reset. The remaining columns describe what is done to the offending transaction, how the error is reported to the system, and how it is reported to the client.
+- Table 3.4 Error Types and Responses
+- Error type
+- Where detected?
+- Containa
+ble
+- Effect on
+transaction
+- Report to system
+- Report to client
+- Security check
+failure
+- Security check
+blocks in MCF and
+- SCF
+- No
+- DECERR bit set in
+request.
+- MCF: Log and
+optional interrupt.
+- SCF: Optional log and
+interrupt (prefetcher can fetch out of range)
+- Note: requests
+arriving with DECERR from SMMU are not reported as failures at MCF.
+- DECERR is reported
+to client hub or
+- NVLinkHub, but hubs
+do not return DECERR to client.
+- DECERR of PTC
+request causes
+- SMMU fault for
+requests that hit on TLB entry.
+- DRAM ECC
+single-bit read error
+- EMC
+- Yes
+- Correct data value
+- Log and optional
+interrupt
+- None
+- Pipeline ECC
+single-bit error
+- Point data is used
+- Yes
+- Correct data value
+- Log and optional
+interrupt
+- None
+- DRAM ECC
+dual-bit read error
+- EMC
+- Yes
+- None
+- Log and optional
+interrupt
+- SLVERR bit set in data
+packet
+- Pipeline ECC
+dual-bit error
+- Point data is used
+- Yes
+- None
+- Log and optional
+interrupt
+- SLVERR bit set in data
+packet
+
+- Memory Subsystem (MSS)
+- Error type
+- Where detected?
+- Containa
+ble
+- Effect on
+transaction
+- Report to system
+- Report to client
+- Parity
+- Any unit that acts
+on the item other than forwarding
+- No
+- Forward or
+suppress, whichever is most natural
+- Log and optional
+interrupt
+- None
+- Timeout
+- MSS implements
+no timeouts N/A N/A N/A N/A
+- DECERRs are detected in the SMMU and in the security check blocks in SCF and MCF. A DECERR
+indicates the request itself is bad, irrespective of the data. Since DECERRs must generate a response, they must be passed through the pipeline. The DECERR bit is set in the request, so the request is effectively a NOP as it passes through the pipe. DECERRs are routed through SCF, or the bypass path based on the normal parameters of the request. Since a DECERR may have an illegal address, and handling illegal requests is a burden we do not want every memory resource to deal with, all DECERR requests are directed to DRAM; to the DRAM channel indicated by the channel mask decode, ignoring all BOM and TOM registers. Writes with DECERRs are suppressed and reads with DECERRs return all 1's. In general, the unit that detects a DECERR, generates an interrupt for it (under configuration register control). DRAM ECC errors are detected in EMC. EMC corrects single-bit errors and optionally logs them (frequent single-bit errors may indicate an imminent hardware failure). Uncorrectable double-bit errors set the slave error (SLVERR) flag in the data packet, are logged, and optionally generate an interrupt. The SLVERR bit is propagated up to the client. Pipeline ECC errors are detected in the unit that receives the data (whether MSS or a requesting unit). Single-bit errors are corrected and may optionally be logged. Uncorrectable double-bit errors set the SLVERR flag in the data packet, are logged, and optionally generate an interrupt. The SLVERR bit is propagated up to the client. NVLink protocol errors are detected by NVLink logic based on detectable corruption of a request. The error is logged and an interrupt optionally generated. The logic detecting the error may kill the request or forward it on, whichever is most convenient, since there's no obvious way to fix it and a hang is likely to result in any case. Parity errors indicate corruption of the command or address. The error is logged and an interrupt optionally generated. The logic detecting the parity error may kill the request or forward it on, whichever is most convenient, since there is no obvious way to fix it and a hang is likely to result in any case. The client AXI interface returns both the DECERR and SLVERR bits. Typically, at most one is set, but if both are set, DECERR prevails. Clients may or may not observe, or act on error responses.
+
+- Memory Subsystem (MSS)
+#### 3.1.2.18 Access Checks (DECERRs)
+SMMU performs access checks based on page-table access restrictions. Requests that fail are marked as DECERRs. The NVLink protection table performs address-based access checks for iGPU and NVLink Master requests. In addition, there are several categories of access checks, which ensure requests are legal and that they follow the access rules for apertures:
+- Address Range Checks
+- VPR Checks
+- GSC Checks
+- AON TZ-SRAM Checks
+- TZ-DRAM Checks
+- SMMU Translation Checks
+iGPU Carveout Checks
+##### 3.1.2.18.1 Location of Access Checks
+These additional security and range access checks are performed in the security check blocks in one of two locations: 1. SoC client requests at the input of MCFSlice. Previously, SoC client checks were done within the two client hubs. Now there are four or more client hubs, plus GPU requests come in separately from the hubs. The location minimizes the number of instances of the security check logic, while protecting all SoC client inputs, whether coherent or not. If a request fails a security check, it causes a DECERR. Details of the violating request (address, client ID, failure
+- ID) are logged in the MC_ERR_* registers. DECERR write requests are suppressed by clearing
+byte enables. DECERR read requests return all 1's, thus preventing dissemination of secure data. If interrupts are enabled, MC throws an interrupt.
+- CCPLEX requests at the ingress to SCF. CPU cluster requests are checked the ingress of
+- SCF for the same reason as above—to distinguish CCPLEX requests from SoC client requests
+in systems that can forward and merge requests. Since no lookup is needed for these tests, the latency can be folded into an existing pipeline stage. If a request fails a security check it is DECERRed. If the request came from a CPU client, an MCA event is generated with a code indicating the type of event (it is not necessarily an error). If the request came from a non- CPU client, no error logging is done. DECERR write requests are suppressed by clearing byte enables. DECERR read requests return all 1's, thus preventing dissemination of secure data. 2.
+- Note that SoC client requests that enter SCF are guaranteed to have been fully checked for
+DECERRs. They do not need to be further checked for DECERRs, although a given request may have its DECERR bit set based on a prior check.
+
+- Memory Subsystem (MSS)
+##### 3.1.2.18.2 Routing and Memory Destination Errors
+Requests are routed to the various memory destinations (DRAM, SysRAM, etc.) over multiple paths (IO coherent path and non-coherent path). Not all combinations are supported. The following combinations are illegal and result in DECERRs and interrupts:
+- DECERR_COH_ISO – ISO requests on the coherent path
+- This error can be suppressed using the programmable register
+MC_MCF_SCF_CFG_0.ALLOW_ISO_REQ_ON_COHERENT_PATH (default is to DECERR).
+- DECERR_IGPU_RESTRICTED_ACCESS – iGPU is only allowed to access specific regions of
+memory as defined by IGPU_ACCESSIBLE_CARVEOUT(1|2)_(BOM|SIZE)
+- The status register MC_ERR_ROUTE_SANITY_STATUS_0 contains the encoding
+- ERR_ROUTE_SANITY_ERR_TYPE which describes the kind of error. MC_ERR_ROUTE_SANITY_ADR_0
+contains the address of the violating transaction. A new bit, DECERR_ROUTE_SANITY_INT, in the MC_INTSTATUS indicates routing related programming errors.
+#### 3.1.2.19 Reporting of Functional Errors
+- Each of the following MSS subunits can generate interrupts to inform software of completed
+events or error conditions encountered by the hardware. The table below gives the subunit and the subunit's primary interrupt status register.
+- Table 3.5 Subunit and Primary Interrupt Status Register
+- Module
+- Interrupt Status Register
+- MCF
+- MC_INTSTATUS_0*
+- HUB
+- MC_HUB_INSTATUS_0
+- HUB_COMMON
+- MC_HUBC_INTSTATUS_0
+- SyncPoint
+- MC_MSS_SBS_INTSTATUS_0
+- MC Channel
+- MC_CH_INTSTATUS_0
+- EMC
+- EMC_INTSTATUS
+Note: MC_INSTATUS_0 is the legacy interrupt status register. Each of the subunits ideally contains the three interrupt registers below, but in some cases only contains the first two: 1.
+- INTSTATUS. Contains the interrupt vector. A bit in this register is set when the hardware
+detects the specific condition that triggers the interrupt. Writing a 1 to the interrupt vector bit clears the associated interrupt.
+
+- Memory Subsystem (MSS)
+2. INTMASK. Contains mask vector for the interrupt vector. Each bit in this register corresponds to a bit in INTSTATUS. If the MASK bit for an interrupt is set (UNMASKED), the corresponding interrupt is forwarded to the global interrupt logic on the non-critical wire. INTPRIORITY. (Not implemented in all units) Contains priority mask vector for the interrupt vector. Each bit in this register corresponds to a bit in INTSTATUS. If the MASK bit for an interrupt is set (UNMASKED), the corresponding interrupt is forwarded to the global interrupt logic on the critical wire. 3. Some subunits have two wires to the global interrupt status logic in HUB-common, and others have only the non-critical wire: intr – interrupt signal to global interrupt logic in HUB-common critical_intr – critical interrupt signal to global interrupt logic in HUB-common For error conditions, ERR_*STATUS registers are provided to log information on the cause of the error (generally the address of the offending transaction, which could be virtual or physical), and other information relevant to the error.
+##### 3.1.2.19.1 Global Interrupt Interface
+- Global interrupt logic in HUB-common aggregates the incoming signals from the subunits and
+exports the following signals to the interrupt processing logic in LIC: mss2lic_mc_critical_intr – OR of incoming critical_intr signals, indicating critical interrupt is active mss2lic_mc_intr – OR of incoming intr signals, indicating non-critical interrupt is active. Each TCU generates secure and non-secure interrupts, and they are routed directly to LIC: mss2lic_smmu_comb_nonsecure_intr – non-secure interrupt from TCU0 mss2lic_smmu_comb_secure_intr – secure interrupt from TCU0 mss2lic_smmu1_comb_nonsecure_intr – non-secure interrupt from TCU1 mss2lic_smmu1_secure_intr – secure interrupt from TCU1 mss2lic_smmu2_comb_nonsecure_intr – non-secure interrupt from TCU2 (ISO SMMU) mss2lic_smmu2_secure_intr – secure interrupt from TCU2 (ISO SMMU) mss2lic_smmu3_comb_nonsecure_intr – non-secure interrupt from TCU3 mss2lic_smmu3_comb_secure_intr – secure interrupt from TCU3 mss2lic_smmu4_comb_nonsecure_intr – non-secure interrupt from TCU4 mss2lic_smmu4_secure_intr – secure interrupt from TCU 4 The following registers within HUB-common show the status of the non-critical and critical input wires from each of the subunits:
+- MC_GLOBAL_INTSTATUS_0
+- MC_GLOBAL_INTSTATUS_1_0
+
+- Memory Subsystem (MSS)
+- MC_GLOBAL_CRITICAL_INTSTATUS_0
+- MC_GLOBAL_CRITICAL_INTSTATUS_1_0
+##### 3.1.2.19.2 MCF Interrupts (including interrupts from the SecChk block)
+The SecChk security block in MCF implements numerous security checks. When an address decode error occurs, the offending address is captured in the MC_ERR_ADDR register and information about the error is captured in one or more MC_ERR_*STATUS registers. The captured information is intended to assist developers in debugging the error. A single request can trigger multiple errors. There are multiple error status registers (MC_ERR_*STATUS) which capture the status of different types of errors, as listed below:
+- MC_ERR_STATUS – Multiple violations. When more than one of the following violations
+occurs, the highest-priority violation is reported (listed below in descending priority order):
+- ERR_TYPE = DECERR_EMEM – DRAM minimum/maximum allowed memory addresses
+- ERR_TYPE = SECURITY_TRUSTZONE – TrustZone carveout violations
+- MC_ERR_GENERALIZED_CARVEOUT_STATUS – GSC carveout violations
+- MC_ERR_SEC_STATUS – SEC carveout violations
+- MC_ERR_VPR_STATUS – VPR carveout violations
+- MC_ERR_ROUTE_SANITY_STATUS – Routing incompatibility errors (including NVLink access
+violations) The capture registers record the following information about the error: the physical address of the error (since security check is post SMMU) which type of fault the captured error corresponds to a read/write indicator the requestor Client ID the swap bit sent by the client
+- Subsequent errors (of any type) do not change the status and address registers until the
+corresponding interrupt is cleared.
+- To prevent requests with address decode errors from modifying memory or accessing memory
+they do not have permission to, the MC "squashes" the requests. A write request that is "squashed" has its byte-enables forced to all zeros; this prevents the write data from being applied to DRAM. A read request that is "squashed" has its read-return data forced to all-ones; this protects the data in DRAM from being read by nonsecure sources.
+##### 3.1.2.19.3 NVLink Interrupts
+- NVLink generates interrupts for malformed NVLink packets, unexpected responses, and NVLink
+protection table violations, etc.
+
+- Memory Subsystem (MSS)
+##### 3.1.2.19.4 Memory Controller Channel Interrupts
+There is currently only one performance warning type interrupt: ARBITRATION_EMEM. It fires when the MC detects that a request has been pending in the Row Sorter long enough to hit the
+- DEADLOCK_PREVENTION_SLACK_THRESHOLD. In addition to true performance problems, this
+interrupt may fire in situations like clock frequency changes, when the EMC backpressures pending traffic for long periods of time. This interrupt is intended to help developers identify and debug performance and configuration issues.
+##### 3.1.2.19.5 EMC Interrupts
+EMC generates interrupts on the following conditions:
+- ECC error buffer overflow
+- ECC correctable error
+- ECC uncorrectable error
+- Clock change FIFO overflow
+- DLL lock timeout
+- DLL alarm: From the EMC Digital DLL when the output delay code reaches the maximum
+value. Attempt to issue command to device which is in self-refresh.
+- Read data from MRR is available (to prevent software from polling for data)
+- DRAM clock change sequence complete
+- Refresh overflow
+##### 3.1.2.19.6 PCIe MSI
+- Message Signaled Interrupts (MSIs) are interrupts conveyed from an endpoint device to the
+interrupt controller by memory transactions, rather than dedicated wires. PCIe MSIs are 32-bit ordered writes received by the PCIe root port (an MSS client) with system physical addresses that fall within the 64MB MSI address region specified by msi_base (iob_msi_base_match/iob_msi_base_mask) where address bits 25-16 are greater than 31, address bits 25-16 are less than 992, and address bits 15-0 are 0x0000.
+- The MSS Hub routes PCIE MSIs through the SMMU to ensure that devices can only trigger
+interrupts assigned to the device. MSS Hub routes MSIs to SCF regardless of other considerations. SCF decodes the MSI address range and forwards MSIs to the IOBridge/GIC. MSIs are required to push all previous writes to visibility before the MSI is sent to the interrupt controller. Because GIC is a separate destination in SCF, the standard ordered write implementation for PCIe writes to memory do not provide the required ordering guarantees for MSI messages. MSI ordering is provided by an interlock in the PCIe controller that waits for WriteAcks of all previously issued writes before forwarding an MSI. Because ordering is handled externally and not by the
+
+- MSS Registers
+ordered write mechanism in SCF, MSS Hub converts MSIs to non-ordered writes before sending to MCF.
+#### 3.1.2.20 Clocking
+- There are separate PLLs for each set of 64 DRAM I/O pads. These four PLLs drive a clocking
+structure with locally synchronous clocks for the following clock domains:
+- Each set of 64 DRAM I/O pads and associated four EMC and four Memory Controller
+- Channels
+- The hub units: MCF, SCF, Client Hubs, and MSS HubCommon
+- Data Backbone (DBB)
+#### 3.1.2.21 Software Interfaces
+The primary software interface for configuration is via the APB bus registers.
+- Initial configuration
+- Power management
+- Device/Rank management
+- SMMU translation management
+- Surface allocation
+- Statistics and debugging
+### 3.1.3 MSS Registers
+- The Memory Subsystem (MSS) is controlled by NVIDIA provided software, and so is not
+documented in detail here. However, some registers are exposed to support customers, and these are listed below.
+- MC_EMEM_ADR_CFG_CHANNEL_ENABLE_0
+External memory address configuration channel select mask configures the routing of requests between the two memory channels. The channel select mask is ANDed with the address of a transaction. The resulting value is XORd to a single bit, which is used to select the channel for the transaction Boot requirements: coldboot - This register should be parameterized in the BCT and written by the BootROM during coldboot. warmboot - This register should be saved in the scratch registers and restored by the BootROM during warmboot. Mask bits [10:9] select single channel vs. dual-channel modes and 512B vs. 1KB interleave as follows, each with its own physical address to <channel, device,="" row,="" bank,="" column=""> mapping.
+
+- MSS Registers
+- Interleave MASK[10:9] Remarks
+- Single channel 2'b00
+512B 2'bx1 Channels alternate on (most) 512B boundaries 1KB 2'b10 Channels alternate on (most) 1KB boundaries While decoding the DRBC data from the address: if mask bit 9 is set then the 9th bit of address is dropped for DRBC decoding; and else if mask bit 10 is set then the 10th bit address is dropped for address decoding. Write access to this register is controlled by the EMEM_CFG_ACCESS_CTRL_0 register </channel,>.
+- Offset: 0xdf8
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x0000000f (0bxxxx,xxxx,xxxx,xxxx,0000,0000,0000,1111)
+- Bit
+- Reset
+- Description
+15:0 0xf EMEM_CHANNEL_ENABLE: [PMC_SECURE] Selects which MC channels are enabled for normal read/writes
+- MC_EMEM_ADR_CFG_CHANNEL_MASK_0
+- Write access to this register is controlled by the EMEM_CFG_ACCESS_CTRL register
+- Offset: 0x60
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x6db66200 (0b0110,1101,1011,0110,0110,001x,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+31:9 0x36db31 EMEM_CHANNEL_MASK: [PMC_SECURE] Mask is ANDed with address and the resulting value is XORd to a single bit, giving bit 0 of the channel index
+- MC_EMEM_ADR_CFG_CHANNEL_MASK_1_0
+- Write access to this register is controlled by the EMEM_CFG_ACCESS_CTRL register
+- Offset: 0xdfc
+- Read/Write: R/W
+
+- MSS Registers
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x6db66400 (0b0110,1101,1011,0110,0110,010x,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+31:9 0x36db32 EMEM_CHANNEL_MASK_1: [PMC_SECURE] Mask is ANDed with address and the resulting value is XORd to a single bit, giving bit 1 of the channel index
+- MC_EMEM_ADR_CFG_CHANNEL_MASK_2_0
+- Write access to this register is controlled by the EMEM_CFG_ACCESS_CTRL register
+- Offset: 0xdf4
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x6db66800 (0b0110,1101,1011,0110,0110,100x,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+31:9 0x36db34 EMEM_CHANNEL_MASK_2: [PMC_SECURE] Mask is ANDed with address and the resulting value is XORd to a single bit, giving bit 2 of the channel index
+- MC_EMEM_ADR_CFG_CHANNEL_MASK_3_0
+- Write access to this register is controlled by the EMEM_CFG_ACCESS_CTRL register
+- Offset: 0xdf0
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x6db67000 (0b0110,1101,1011,0110,0111,000x,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+31:9 0x36db38 EMEM_CHANNEL_MASK_3: [PMC_SECURE] Mask is ANDed with address and the resulting value is XORd to a single bit, giving bit 2 of the channel i ndex
+
+- Address Map
+## 3.2 Address Map
+### 3.2.1 Overview
+This chapter defines the system Address Map (AMAP).
+- The term “Address” reflects the Physical Address as seen by the main CPU complex, unless
+specified otherwise. The SoC has several subsystems such as the BPMP, SPE, Audio, etc. The processors in these subsystems may have a different view of the System AMAP. The AMAP specifications for these subsystems are explained in more detail in the corresponding subsystem section of this document.
+- The term AMAP implies System Address Map or Global Address Map (with the terms System
+Address Map and Global Address Map being used interchangeably), unless otherwise specified.
+#### 3.2.1.1 Features
+64 KiB Alignment
+- Arm Architecture recommends aligning all peripheral address ranges along the MMU page
+sizes. This enables each device to occupy a single entry in the Page Table and makes it possible to uniquely identify and describe device access attributes. The page can be uniquely classified under a non-normal memory type such as nGnRnE (for SO) or nGnRE (for DEV). Refer to the ARMv8 Architecture Reference Manuals for more information.
+- Page-alignment of peripherals also improves security across virtualized guest Operating
+Systems. Armv8 supports three types of page sizes in its MMU: 4 KiB, 16 KiB, and 64 KiB.
+- By aligning with 64 KiB, all three implementations are supported and sufficient MMIO for
+each device is allocated. 40-bit Address Map The SoC supports a one Terabyte AMAP (1 TiB or 40 bits of addressing).
+- PCIe Aperture
+- The SoC offers two apertures for PCIe: one for a 32-bit address OS and the other for a
+greater-than 32-bit address OS. Each PCIe controller is provided with a 32 MiB aperture. The PCIe aperture for greater-than 32-bit address OS handles situations with large AMAP requirements, which cannot be addressed by drivers running on a 32-bit address OS.
+
+- Address Map
+#### 3.2.1.2 AMAP and Aperture
+The SoC supports a 1-Terabyte AMAP (40 bits). See below for a high-level overview of the AMAP.
+- Table 3.6 AMAP Overview
+- Name
+- Address Range
+- Reserved (1023 GiB - 1024 GiB)
+0xFF_C000_0000 - 0xFF_FFFF_FFFF
+- Off-Chip Aperture (256 GiB - 1023 GiB)
+0x40_0000_0000 - 0xFF_BFFF_FFFF
+- PCIe Reconfigurable Aperture for > 32-bit OS (130 GiB - 256
+- GiB)(1)
+0x20_8000_0000 - 0x3F_FFFF_FFFF
+- DRAM Aperture (2 GiB - 130 GiB)
+0x00_8000_0000 - 0x20_7FFF_FFFF
+- On-Chip Data/Sync Plane (1 GiB - 2 GiB)
+0x00_4000_0000 - 0x00_7FFF_FFFF
+- PCIe Reconfigurable Aperture for 32-bit OS (640 MB - 1 GiB)
+0x00_3000_0000 - 0x00_3FFF_FFFF
+- MMIO Aperture (0 GiB - 640 MB)
+0x00_0000_0000 - 0x00_3FFF_FFFF 1. The control plane extends beyond 4 GiB for PCIe controllers controlled by > 32-bit OS.
+
+- Address Map
+**Figure 3.4 AMAP Diagram**
+#### 3.2.1.3 MMIO Aperture
+The MMIO aperture begins at the bottom of memory (0x0) and extends to 1 GiB.
+
+- Address Map
+**Figure 3.5 MMIO Aperture**
+This region houses the following apertures:
+- Configuration register apertures of all IPs of the SoC
+144 MiB iGPU aperture
+- PCIe aperture for 32-bit OS in its top 384 MiB. This is used for configuration, MMIO, IOIO
+space and is accessible by 32-bit OS. (Note: the APE only decodes apertures below 0.75 GiB to the control backbone, so it cannot access PCIe. Since the High Definition Audio (HDA) controller sits under the 0.75 GiB range, there is no need for APE to ever access any PCIe controller.) Each PCIe controller is provided with a 32 MiB aperture.
+- PCIe APB configuration space is disjointed from this space and can live anywhere outside
+this range.
+#### 3.2.1.4 On-Chip Data/Sync Plane Aperture
+The following figure shows the On-Chip Data/Sync Plane aperture.
+
+- Address Map
+**Figure 3.6 On-Chip Data/Sync Plane Aperture**
+This region houses the following: The SysRAM region starting at 1 GiB. A 256 MiB region is reserved, although physical SysRAM
+- Size is 512 KiB. 256 MiB allows for a higher steering granularity at the System Coherency
+Fabric (SCF) in the CCPLEX. All CPUs should access SysRAM at this physical location, without the need of any address translation.
+- The 4 MiB Compute Vision SRAM (CV-SRAM), used by Programmable Vision Accelerators
+(PVAs) and Deep Learning Accelerators. A 256 MiB region is reserved for this similarly to SysRAM.
+- The dGPU Host Controller Sync Point aperture. This is a 64 MiB Sync Point Region that is
+used to convert the dGPU's semaphores into Host Controller sync points. Note that this region can also be used by any non Host Controller clients. This region shadows the Sync
+- Point RAM in Host Controller using a sideband interface between Host Controller and
+- Memory. Previously, the GPU needed a sideband interface into the Host Controller Sync
+Point to talk to any other Host Controller client. With this Sync Point region, the sideband with Host Controller is removed from the GPU. Reserved region beyond the dGPU Sync Point aperture.
+#### 3.2.1.5 DRAM Aperture
+- The DRAM aperture is used for the Physical Address of the off-chip local DRAM. The AMAP
+supports up to 128 GiB of DRAM. A 32-bit OS can access the lower 2 GiB Physical DRAM location (AMAP region from 2 GiB to 4 GiB). In order to access DRAM above 4 GiB in the AMAP, a 32-bit OS must use an additional address translation capability like AST or the SMMU.
+
+- Address Map
+#### 3.2.1.6 PCIe Aperture (32-bit OS)
+The SoC has two apertures for PCIe: one for 32-bit OS (a sub-aperture within the MMIO aperture) and the other for >32-bit OS (see figure below).
+**Figure 3.7 PCIe Aperture (32-bit OS)**
+The PCIe aperture for a 64-bit OS handles situations with large AMAP requirements. When a PCIe controller is connected to a device that has multiple functions, where each function can in turn be a switch, it presents large AMAP requirements. Such large AMAP requirements cannot be met under 4 GiB and hence cannot be addressed by drivers running on 32-bit CPUs.
+
+- System Address Map
+**Figure 3.8 PCIe Controller Connection Example**
+The SoC platforms can present a similar large AMAP requirement. PCIe x8/x4 controllers are used to connect SoC devices to dGPUs or NVSwitch. There are also three PCIe x1 controllers that present a 1 GiB per controller requirement. An 8 GiB space is reserved for the PCIe x1 controllers to allow for future expansion.
+#### 3.2.1.7 Off-Chip Aperture
+This configurable (BOM/TOM registers in SCF and MCF) aperture allows the AMAP to be adjusted to the required platform. This region can be used to access
+- Peer DRAM Dual SoC platforms
+dGPUs VIDMEM in SoC with Discrete GPU platforms
+- Other dGPUs VIDMEMs and other DRAMs in Single/Multiple SoC with Multiple dGPUs
+platform
+### 3.2.2 System Address Map
+
+- System Address Map
+The locality column indicates if apertures are only accessible by some masters. For example:
+- SYSTEM - indicates access is possible from all Initiators unless the paths from a
+master to slave is not physically present. CCPLEX - indicates access is only possible from CCPLEX, the main CPU complex.
+- SYSTEM_CFG - same as SYSTEM. In addition, when an IP can exist in various modes,
+this indicates the exact register bit that is used to decide the mode.
+- For example, the PCIe controller can exist as a Root Complex or as an End Point. For
+each mode, the header file is different.
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- MMIO
+0x00000000 0x3fffffff
+- SYSTEM
+- BPMP_ATCM
+0x00000000 0x0007ffff
+- BPMP
+- FSI_CPU0_ATCM
+0x00000000 0x0003ffff
+- FSI
+- FSI_CPU1_ATCM
+0x00000000 0x0003ffff
+- FSI
+- FSI_CPU2_ATCM
+0x00000000 0x0003ffff
+- FSI
+- FSI_CPU3_ATCM
+0x00000000 0x0003ffff
+- FSI
+- FSI_CPU_ATCM
+0x00000000 0x0003ffff
+- FSI
+- PVA0_ATCM
+0x00000000 0x0001ffff
+- PVA0
+- AON_ATCM
+0x00000000 0x0000ffff
+- AON
+- DCE_ATCM
+0x00000000 0x0000ffff
+- DCE
+- LOVEC
+0x00000000 0x0000ffff
+- CCPLEX
+- RCE_ATCM
+0x00000000 0x0000ffff
+- RCE
+- SCE_ATCM
+0x00000000 0x0000ffff
+- SCE
+- APE_ADSP_EVP
+0x00000000 0x00001fff
+- APE
+- AON_ATCM_EVP
+0x00000000 0x00000fff
+- AON
+- BPMP_ATCM_EVP
+0x00000000 0x00000fff
+- BPMP
+- DCE_ATCM_EVP
+0x00000000 0x00000fff
+- DCE
+- FSI_CHSM_ATCM_EVP
+0x00000000 0x00000fff
+- FSI
+- PVA0_ATCM_EVP
+0x00000000 0x00000fff
+- PVA0
+- RCE_ATCM_EVP
+0x00000000 0x00000fff
+- RCE
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- SCE_ATCM_EVP
+0x00000000 0x00000fff
+- SCE
+- APE_ADSP_PERIPH
+0x00002000 0x00003fff
+- APE
+- APE_ADSP_L2CC
+0x00004000 0x00004fff
+- APE
+- BPMP_BOOTROM
+0x00010000 0x0003ffff
+- BPMP
+- PVA0_ATCM_RAM
+0x00010000 0x0001ffff
+- PVA0
+- BPMP_BOOTROM_MODEL
+0x00040000 0x0007ffff
+- BPMP
+- FSI_CHSM_ATCM
+0x00040000 0x0007ffff
+- FSI
+- FSI_CPU_BTCM
+0x00040000 0x0005ffff
+- FSI
+- FSI_CPU_CTCM
+0x00060000 0x0007ffff
+- FSI
+- MISC
+0x00100000 0x0017ffff
+- SYSTEM
+- PVA0_VPS0_MEM
+0x00600000 0x006fffff
+- PVA0
+- PVA0_VPS0_ICACHE
+0x00600000 0x00603fff
+- PVA0
+- PVA0_VPS0_VMEM0
+0x00640000 0x0065ffff
+- PVA0
+- PVA0_VPS0_VMEM1
+0x00680000 0x0069ffff
+- PVA0
+- PVA0_VPS0_VMEM2
+0x006c0000 0x006dffff
+- PVA0
+- PVA0_VPS1_MEM
+0x00700000 0x007fffff
+- PVA0
+- PVA0_VPS1_ICACHE
+0x00700000 0x00703fff
+- PVA0
+- PVA0_VPS1_VMEM0
+0x00740000 0x0075ffff
+- PVA0
+- PVA0_VPS1_VMEM1
+0x00780000 0x0079ffff
+- PVA0
+- PVA0_VPS1_VMEM2
+0x007c0000 0x007dffff
+- PVA0
+- GBEUPHY_0
+0x01000000 0x01001fff
+- SYSTEM
+- GBEUPHY_PLL0
+0x01000000 0x01001fff
+- SYSTEM
+- GBEUPHY_1
+0x01002000 0x01003fff
+- SYSTEM
+- GBEUPHY_LANE0
+0x01002000 0x01002fff
+- SYSTEM
+- GBEUPHY_LANE1
+0x01003000 0x01003fff
+- SYSTEM
+- GBEUPHY_2
+0x01004000 0x01005fff
+- SYSTEM
+- GBEUPHY_LANE2
+0x01004000 0x01004fff
+- SYSTEM
+- GBEUPHY_LANE3
+0x01005000 0x01005fff
+- SYSTEM
+- GBEUPHY_3
+0x01006000 0x01007fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- GBEUPHY_PLL1
+0x01006000 0x01007fff
+- SYSTEM
+- GBEUPHY_4
+0x01008000 0x01009fff
+- SYSTEM
+- GBEUPHY_LANE4
+0x01008000 0x01008fff
+- SYSTEM
+- GBEUPHY_LANE5
+0x01009000 0x01009fff
+- SYSTEM
+- GBEUPHY_5
+0x0100a000 0x0100bfff
+- SYSTEM
+- GBEUPHY_LANE6
+0x0100a000 0x0100afff
+- SYSTEM
+- GBEUPHY_LANE7
+0x0100b000 0x0100bfff
+- SYSTEM
+- GBEUPHY_6
+0x0100c000 0x0100dfff
+- SYSTEM
+- GBEUPHY_PLL2
+0x0100c000 0x0100dfff
+- SYSTEM
+- TOP2_HSP
+0x01600000 0x0168ffff
+- SYSTEM
+- TOP2_HSP_COMMON
+0x01600000 0x0160ffff
+- SYSTEM
+- TOP2_HSP_SM
+0x01610000 0x0164ffff
+- SYSTEM
+- TOP2_HSP_SM_0_1
+0x01610000 0x0161ffff
+- SYSTEM
+- TOP2_HSP_SM_2_3
+0x01620000 0x0162ffff
+- SYSTEM
+- TOP2_HSP_SM_4_5
+0x01630000 0x0163ffff
+- SYSTEM
+- TOP2_HSP_SM_6_7
+0x01640000 0x0164ffff
+- SYSTEM
+- TOP2_HSP_SS
+0x01650000 0x0168ffff
+- SYSTEM
+- TOP2_HSP_SS_0
+0x01650000 0x0165ffff
+- SYSTEM
+- TOP2_HSP_SS_1
+0x01660000 0x0166ffff
+- SYSTEM
+- TOP2_HSP_SS_2
+0x01670000 0x0167ffff
+- SYSTEM
+- TOP2_HSP_SS_3
+0x01680000 0x0168ffff
+- SYSTEM
+- MSS_2
+0x01700000 0x017fffff
+- SYSTEM
+- MC8
+0x01700000 0x0170ffff
+- SYSTEM
+- MC9
+0x01710000 0x0171ffff
+- SYSTEM
+- MC10
+0x01720000 0x0172ffff
+- SYSTEM
+- MC11
+0x01730000 0x0173ffff
+- SYSTEM
+- MC12
+0x01740000 0x0174ffff
+- SYSTEM
+- MC13
+0x01750000 0x0175ffff
+- SYSTEM
+- MC14
+0x01760000 0x0176ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- MC15
+0x01770000 0x0177ffff
+- SYSTEM
+- EMC8
+0x01780000 0x0178ffff
+- SYSTEM
+- EMC8_CORE
+0x01780000 0x01780fff
+- SYSTEM
+- EMC8_CFG
+0x01781000 0x01781fff
+- SYSTEM
+- EMC8_EC
+0x01782000 0x01782fff
+- SYSTEM
+- EMC8_TR
+0x01783000 0x01783fff
+- SYSTEM
+- EMC8_MISC
+0x01784000 0x0178ffff
+- SYSTEM
+- EMC9
+0x01790000 0x0179ffff
+- SYSTEM
+- EMC9_CORE
+0x01790000 0x01790fff
+- SYSTEM
+- EMC9_CFG
+0x01791000 0x01791fff
+- SYSTEM
+- EMC9_EC
+0x01792000 0x01792fff
+- SYSTEM
+- EMC9_TR
+0x01793000 0x01793fff
+- SYSTEM
+- EMC9_MISC
+0x01794000 0x0179ffff
+- SYSTEM
+- EMC10
+0x017a0000 0x017affff
+- SYSTEM
+- EMC10_CORE
+0x017a0000 0x017a0fff
+- SYSTEM
+- EMC10_CFG
+0x017a1000 0x017a1fff
+- SYSTEM
+- EMC10_EC
+0x017a2000 0x017a2fff
+- SYSTEM
+- EMC10_TR
+0x017a3000 0x017a3fff
+- SYSTEM
+- EMC10_MISC
+0x017a4000 0x017affff
+- SYSTEM
+- EMC11
+0x017b0000 0x017bffff
+- SYSTEM
+- EMC11_CORE
+0x017b0000 0x017b0fff
+- SYSTEM
+- EMC11_CFG
+0x017b1000 0x017b1fff
+- SYSTEM
+- EMC11_EC
+0x017b2000 0x017b2fff
+- SYSTEM
+- EMC11_TR
+0x017b3000 0x017b3fff
+- SYSTEM
+- EMC11_MISC
+0x017b4000 0x017bffff
+- SYSTEM
+- EMC12
+0x017c0000 0x017cffff
+- SYSTEM
+- EMC12_CORE
+0x017c0000 0x017c0fff
+- SYSTEM
+- EMC12_CFG
+0x017c1000 0x017c1fff
+- SYSTEM
+- EMC12_EC
+0x017c2000 0x017c2fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- EMC12_TR
+0x017c3000 0x017c3fff
+- SYSTEM
+- EMC12_MISC
+0x017c4000 0x017cffff
+- SYSTEM
+- EMC13
+0x017d0000 0x017dffff
+- SYSTEM
+- EMC13_CORE
+0x017d0000 0x017d0fff
+- SYSTEM
+- EMC13_CFG
+0x017d1000 0x017d1fff
+- SYSTEM
+- EMC13_EC
+0x017d2000 0x017d2fff
+- SYSTEM
+- EMC13_TR
+0x017d3000 0x017d3fff
+- SYSTEM
+- EMC13_MISC
+0x017d4000 0x017dffff
+- SYSTEM
+- EMC14
+0x017e0000 0x017effff
+- SYSTEM
+- EMC14_CORE
+0x017e0000 0x017e0fff
+- SYSTEM
+- EMC14_CFG
+0x017e1000 0x017e1fff
+- SYSTEM
+- EMC14_EC
+0x017e2000 0x017e2fff
+- SYSTEM
+- EMC14_TR
+0x017e3000 0x017e3fff
+- SYSTEM
+- EMC14_MISC
+0x017e4000 0x017effff
+- SYSTEM
+- EMC15
+0x017f0000 0x017fffff
+- SYSTEM
+- EMC15_CORE
+0x017f0000 0x017f0fff
+- SYSTEM
+- EMC15_CFG
+0x017f1000 0x017f1fff
+- SYSTEM
+- EMC15_EC
+0x017f2000 0x017f2fff
+- SYSTEM
+- EMC15_TR
+0x017f3000 0x017f3fff
+- SYSTEM
+- EMC15_MISC
+0x017f4000 0x017fffff
+- SYSTEM
+- MSS_NVLINK_8
+0x01e00000 0x01e1ffff
+- SYSTEM
+- MSS_NVLINK
+0x01f00000 0x01ffffff
+- SYSTEM
+- MSS_NVLINK_1
+0x01f20000 0x01f3ffff
+- SYSTEM
+- MSS_NVLINK_2
+0x01f40000 0x01f5ffff
+- SYSTEM
+- MSS_NVLINK_3
+0x01f60000 0x01f7ffff
+- SYSTEM
+- MSS_NVLINK_4
+0x01f80000 0x01f9ffff
+- SYSTEM
+- MSS_NVLINK_5
+0x01fa0000 0x01fbffff
+- SYSTEM
+- MSS_NVLINK_6
+0x01fc0000 0x01fdffff
+- SYSTEM
+- MSS_NVLINK_7
+0x01fe0000 0x01ffffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- TSA_0
+0x02000000 0x0207ffff
+- SYSTEM
+- TSA_NODE_0
+0x02000000 0x02000fff
+- SYSTEM
+- TSA_NODE_1
+0x02001000 0x02001fff
+- SYSTEM
+- TSA_NODE_2
+0x02002000 0x02002fff
+- SYSTEM
+- TSA_NODE_3
+0x02003000 0x02003fff
+- SYSTEM
+- TSA_NODE_4
+0x02004000 0x02004fff
+- SYSTEM
+- TSA_NODE_5
+0x02005000 0x02005fff
+- SYSTEM
+- TSA_NODE_6
+0x02006000 0x02006fff
+- SYSTEM
+- TSA_NODE_7
+0x02007000 0x02007fff
+- SYSTEM
+- TSA_NODE_8
+0x02008000 0x02008fff
+- SYSTEM
+- TSA_NODE_10
+0x0200a000 0x0200afff
+- SYSTEM
+- TSA_NODE_13
+0x0200d000 0x0200dfff
+- SYSTEM
+- TSA_NODE_14
+0x0200e000 0x0200efff
+- SYSTEM
+- TSA_NODE_16
+0x02010000 0x02010fff
+- SYSTEM
+- TSA_NODE_18
+0x02012000 0x02012fff
+- SYSTEM
+- TSA_NODE_21
+0x02015000 0x02015fff
+- SYSTEM
+- TSA_NODE_24
+0x02018000 0x02018fff
+- SYSTEM
+- TSA_NODE_25
+0x02019000 0x02019fff
+- SYSTEM
+- TSA_NODE_26
+0x0201a000 0x0201afff
+- SYSTEM
+- TSA_NODE_27
+0x0201b000 0x0201bfff
+- SYSTEM
+- TSA_NODE_29
+0x0201d000 0x0201dfff
+- SYSTEM
+- TSA_NODE_30
+0x0201e000 0x0201efff
+- SYSTEM
+- TSA_NODE_33
+0x02021000 0x02021fff
+- SYSTEM
+- TSA_NODE_36
+0x02024000 0x02024fff
+- SYSTEM
+- TSA_NODE_37
+0x02025000 0x02025fff
+- SYSTEM
+- TSA_NODE_39
+0x02027000 0x02027fff
+- SYSTEM
+- TSA_NODE_40
+0x02028000 0x02028fff
+- SYSTEM
+- TSA_NODE_42
+0x0202a000 0x0202afff
+- SYSTEM
+- TSA_NODE_44
+0x0202c000 0x0202cfff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- TSA_NODE_45
+0x0202d000 0x0202dfff
+- SYSTEM
+- TSA_NODE_46
+0x0202e000 0x0202efff
+- SYSTEM
+- TSA_NODE_48
+0x02030000 0x02030fff
+- SYSTEM
+- TSA_NODE_52
+0x02034000 0x02034fff
+- SYSTEM
+- TSA_NODE_53
+0x02035000 0x02035fff
+- SYSTEM
+- TSA_NODE_57
+0x02039000 0x02039fff
+- SYSTEM
+- TSA_NODE_58
+0x0203a000 0x0203afff
+- SYSTEM
+- TSA_NODE_60
+0x0203c000 0x0203cfff
+- SYSTEM
+- TSA_NODE_61
+0x0203d000 0x0203dfff
+- SYSTEM
+- TSA_NODE_63
+0x0203f000 0x0203ffff
+- SYSTEM
+- TSA_NODE_65
+0x02041000 0x02041fff
+- SYSTEM
+- TSA_NODE_67
+0x02043000 0x02043fff
+- SYSTEM
+- TSA_NODE_68
+0x02044000 0x02044fff
+- SYSTEM
+- TSA_NODE_72
+0x02048000 0x02048fff
+- SYSTEM
+- TSA_NODE_75
+0x0204b000 0x0204bfff
+- SYSTEM
+- TSA_NODE_77
+0x0204d000 0x0204dfff
+- SYSTEM
+- TSA_NODE_78
+0x0204e000 0x0204efff
+- SYSTEM
+- TSA_NODE_81
+0x02051000 0x02051fff
+- SYSTEM
+- TSA_NODE_83
+0x02053000 0x02053fff
+- SYSTEM
+- TSA_NODE_85
+0x02055000 0x02055fff
+- SYSTEM
+- TSA_NODE_90
+0x0205a000 0x0205afff
+- SYSTEM
+- TSA_NODE_96
+0x02060000 0x02060fff
+- SYSTEM
+- TSA_NODE_97
+0x02061000 0x02061fff
+- SYSTEM
+- TSA_NODE_98
+0x02062000 0x02062fff
+- SYSTEM
+- TSA_NODE_99
+0x02063000 0x02063fff
+- SYSTEM
+- TSA_NODE_100
+0x02064000 0x02064fff
+- SYSTEM
+- TSA_NODE_101
+0x02065000 0x02065fff
+- SYSTEM
+- TSA_NODE_104
+0x02068000 0x02068fff
+- SYSTEM
+- TSA_NODE_106
+0x0206a000 0x0206afff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- TSA_NODE_109
+0x0206d000 0x0206dfff
+- SYSTEM
+- TSA_NODE_110
+0x0206e000 0x0206efff
+- SYSTEM
+- TSA_NODE_117
+0x02075000 0x02075fff
+- SYSTEM
+- TSA_NODE_120
+0x02078000 0x02078fff
+- SYSTEM
+- TSA_NODE_123
+0x0207b000 0x0207bfff
+- SYSTEM
+- TOP_TKE
+0x02080000 0x021bffff
+- SYSTEM
+- TMR_SHARED
+0x02080000 0x0208ffff
+- SYSTEM
+- TOP_TKE_TMR
+0x02090000 0x0218ffff
+- SYSTEM
+- TMR0
+0x02090000 0x0209ffff
+- SYSTEM
+- TMR1
+0x020a0000 0x020affff
+- SYSTEM
+- TMR2
+0x020b0000 0x020bffff
+- SYSTEM
+- TMR3
+0x020c0000 0x020cffff
+- SYSTEM
+- TMR4
+0x020d0000 0x020dffff
+- SYSTEM
+- TMR5
+0x020e0000 0x020effff
+- SYSTEM
+- TMR6
+0x020f0000 0x020fffff
+- SYSTEM
+- TMR7
+0x02100000 0x0210ffff
+- SYSTEM
+- TMR8
+0x02110000 0x0211ffff
+- SYSTEM
+- TMR9
+0x02120000 0x0212ffff
+- SYSTEM
+- TMR10
+0x02130000 0x0213ffff
+- SYSTEM
+- TMR11
+0x02140000 0x0214ffff
+- SYSTEM
+- TMR12
+0x02150000 0x0215ffff
+- SYSTEM
+- TMR13
+0x02160000 0x0216ffff
+- SYSTEM
+- TMR14
+0x02170000 0x0217ffff
+- SYSTEM
+- TMR15
+0x02180000 0x0218ffff
+- SYSTEM
+- TOP_TKE_WDT
+0x02190000 0x021bffff
+- SYSTEM
+- WDT0
+0x02190000 0x0219ffff
+- SYSTEM
+- WDT1
+0x021a0000 0x021affff
+- SYSTEM
+- WDT2
+0x021b0000 0x021bffff
+- SYSTEM
+- GPIO_CTL
+0x02200000 0x022fffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- GPIO_CTL_COMMON
+0x02200000 0x0220ffff
+- SYSTEM
+- GPIO_CTL_COMMON_GPIO0
+0x02200000 0x02200fff
+- SYSTEM
+- GPIO_CTL_COMMON_GPIO1
+0x02201000 0x02201fff
+- SYSTEM
+- GPIO_CTL_COMMON_GPIO2
+0x02202000 0x02202fff
+- SYSTEM
+- GPIO_CTL_COMMON_GPIO3
+0x02203000 0x02203fff
+- SYSTEM
+- GPIO_CTL_COMMON_GPIO4
+0x02204000 0x02204fff
+- SYSTEM
+- GPIO_CTL_COMMON_GPIO5
+0x02205000 0x02205fff
+- SYSTEM
+- GPIO_CTL0
+0x02210000 0x0221ffff
+- SYSTEM
+- GPIO_CTL0_GPIO0
+0x02210000 0x02210fff
+- SYSTEM
+- GPIO_CTL0_GPIO1
+0x02211000 0x02211fff
+- SYSTEM
+- GPIO_CTL0_GPIO2
+0x02212000 0x02212fff
+- SYSTEM
+- GPIO_CTL0_GPIO3
+0x02213000 0x02213fff
+- SYSTEM
+- GPIO_CTL0_GPIO4
+0x02214000 0x02214fff
+- SYSTEM
+- GPIO_CTL0_GPIO5
+0x02215000 0x02215fff
+- SYSTEM
+- GPIO_CTL1
+0x02220000 0x0222ffff
+- SYSTEM
+- GPIO_CTL1_GPIO0
+0x02220000 0x02220fff
+- SYSTEM
+- GPIO_CTL1_GPIO1
+0x02221000 0x02221fff
+- SYSTEM
+- GPIO_CTL1_GPIO2
+0x02222000 0x02222fff
+- SYSTEM
+- GPIO_CTL1_GPIO3
+0x02223000 0x02223fff
+- SYSTEM
+- GPIO_CTL1_GPIO4
+0x02224000 0x02224fff
+- SYSTEM
+- GPIO_CTL1_GPIO5
+0x02225000 0x02225fff
+- SYSTEM
+- GPIO_CTL2
+0x02230000 0x0223ffff
+- SYSTEM
+- GPIO_CTL2_GPIO0
+0x02230000 0x02230fff
+- SYSTEM
+- GPIO_CTL2_GPIO1
+0x02231000 0x02231fff
+- SYSTEM
+- GPIO_CTL2_GPIO2
+0x02232000 0x02232fff
+- SYSTEM
+- GPIO_CTL2_GPIO3
+0x02233000 0x02233fff
+- SYSTEM
+- GPIO_CTL2_GPIO4
+0x02234000 0x02234fff
+- SYSTEM
+- GPIO_CTL2_GPIO5
+0x02235000 0x02235fff
+- SYSTEM
+- GPIO_CTL3
+0x02240000 0x0224ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- GPIO_CTL3_GPIO0
+0x02240000 0x02240fff
+- SYSTEM
+- GPIO_CTL3_GPIO1
+0x02241000 0x02241fff
+- SYSTEM
+- GPIO_CTL3_GPIO2
+0x02242000 0x02242fff
+- SYSTEM
+- GPIO_CTL3_GPIO3
+0x02243000 0x02243fff
+- SYSTEM
+- GPIO_CTL3_GPIO4
+0x02244000 0x02244fff
+- SYSTEM
+- GPIO_CTL3_GPIO5
+0x02245000 0x02245fff
+- SYSTEM
+- GPIO_CTL4
+0x02250000 0x0225ffff
+- SYSTEM
+- GPIO_CTL4_GPIO0
+0x02250000 0x02250fff
+- SYSTEM
+- GPIO_CTL4_GPIO1
+0x02251000 0x02251fff
+- SYSTEM
+- GPIO_CTL4_GPIO2
+0x02252000 0x02252fff
+- SYSTEM
+- GPIO_CTL4_GPIO3
+0x02253000 0x02253fff
+- SYSTEM
+- GPIO_CTL4_GPIO4
+0x02254000 0x02254fff
+- SYSTEM
+- GPIO_CTL4_GPIO5
+0x02255000 0x02255fff
+- SYSTEM
+- GPIO_CTL5
+0x02260000 0x0226ffff
+- SYSTEM
+- GPIO_CTL5_GPIO0
+0x02260000 0x02260fff
+- SYSTEM
+- GPIO_CTL5_GPIO1
+0x02261000 0x02261fff
+- SYSTEM
+- GPIO_CTL5_GPIO2
+0x02262000 0x02262fff
+- SYSTEM
+- GPIO_CTL5_GPIO3
+0x02263000 0x02263fff
+- SYSTEM
+- GPIO_CTL5_GPIO4
+0x02264000 0x02264fff
+- SYSTEM
+- GPIO_CTL5_GPIO5
+0x02265000 0x02265fff
+- SYSTEM
+- GPIO_CTL6
+0x02270000 0x0227ffff
+- SYSTEM
+- GPIO_CTL6_GPIO0
+0x02270000 0x02270fff
+- SYSTEM
+- GPIO_CTL6_GPIO1
+0x02271000 0x02271fff
+- SYSTEM
+- GPIO_CTL6_GPIO2
+0x02272000 0x02272fff
+- SYSTEM
+- GPIO_CTL6_GPIO3
+0x02273000 0x02273fff
+- SYSTEM
+- GPIO_CTL6_GPIO4
+0x02274000 0x02274fff
+- SYSTEM
+- GPIO_CTL6_GPIO5
+0x02275000 0x02275fff
+- SYSTEM
+- GPIO_CTL7
+0x02280000 0x0228ffff
+- SYSTEM
+- GPIO_CTL7_GPIO0
+0x02280000 0x02280fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- GPIO_CTL7_GPIO1
+0x02281000 0x02281fff
+- SYSTEM
+- GPIO_CTL7_GPIO2
+0x02282000 0x02282fff
+- SYSTEM
+- GPIO_CTL7_GPIO3
+0x02283000 0x02283fff
+- SYSTEM
+- GPIO_CTL7_GPIO4
+0x02284000 0x02284fff
+- SYSTEM
+- GPIO_CTL7_GPIO5
+0x02285000 0x02285fff
+- SYSTEM
+- EQOS
+0x02300000 0x0239ffff
+- SYSTEM
+- EQOS_MAC_HV
+0x02300000 0x0230ffff
+- SYSTEM
+- EQOS_MAC_RM
+0x02310000 0x0231ffff
+- SYSTEM
+- EQOS_MAC_RM_CFG
+0x02310000 0x0231efff
+- SYSTEM
+- EQOS_MAC_RM_ERR
+0x0231f000 0x0231ffff
+- SYSTEM
+- EQOS_MAC_VM0
+0x02320000 0x0232ffff
+- SYSTEM
+- EQOS_MAC_VM1
+0x02330000 0x0233ffff
+- SYSTEM
+- EQOS_MAC_VM2
+0x02340000 0x0234ffff
+- SYSTEM
+- EQOS_MAC_VM3
+0x02350000 0x0235ffff
+- SYSTEM
+- EQOS_MAC_VM4
+0x02360000 0x0236ffff
+- SYSTEM
+- EQOS_MAC_VM5
+0x02370000 0x0237ffff
+- SYSTEM
+- EQOS_MAC_VM6
+0x02380000 0x0238ffff
+- SYSTEM
+- EQOS_MAC_VM7
+0x02390000 0x0239ffff
+- SYSTEM
+- EQOS_MACSEC
+0x023c0000 0x023effff
+- SYSTEM
+- EQOS_MACSEC_TZ
+0x023c0000 0x023cffff
+- SYSTEM
+- EQOS_MACSEC_RM
+0x023d0000 0x023dffff
+- SYSTEM
+- EQOS_MACSEC_RM_CFG
+0x023d0000 0x023dcfff
+- SYSTEM
+- EQOS_MACSEC_RM_TX_BYP
+0x023dd000 0x023ddfff
+- SYSTEM
+- EQOS_MACSEC_RM_RX_BYP
+0x023de000 0x023defff
+- SYSTEM
+- EQOS_MACSEC_RM_ERR
+0x023df000 0x023dffff
+- SYSTEM
+- EQOS_MACSEC_VM
+0x023e0000 0x023effff
+- SYSTEM
+- EQOS_MACSEC_VM_STATS
+0x023e0000 0x023eefff
+- SYSTEM
+- EQOS_MACSEC_VM_STS_ERR
+0x023ef000 0x023effff
+- SYSTEM
+- HDACODEC
+0x0242c000 0x0242cfff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- PADCTL_A
+0x02430000 0x0244ffff
+- SYSTEM
+- PADCTL_A0
+0x02430000 0x02430fff
+- SYSTEM
+- PADCTL_A2
+0x02432000 0x02432fff
+- SYSTEM
+- PADCTL_A4
+0x02434000 0x02434fff
+- SYSTEM
+- PADCTL_A5
+0x02435000 0x02435fff
+- SYSTEM
+- PADCTL_A6
+0x02436000 0x02436fff
+- SYSTEM
+- PADCTL_A7
+0x02437000 0x02437fff
+- SYSTEM
+- PADCTL_A8
+0x02438000 0x02438fff
+- SYSTEM
+- PADCTL_A11
+0x0243b000 0x0243bfff
+- SYSTEM
+- PADCTL_A13
+0x0243d000 0x0243dfff
+- SYSTEM
+- PADCTL_A16
+0x02440000 0x02440fff
+- SYSTEM
+- PADCTL_A17
+0x02441000 0x02441fff
+- SYSTEM
+- PADCTL_A20
+0x02444000 0x02444fff
+- SYSTEM
+- PADCTL_A21
+0x02445000 0x02445fff
+- SYSTEM
+- PADCTL_A24
+0x02448000 0x02448fff
+- SYSTEM
+- PADCTL_A25
+0x02449000 0x02449fff
+- SYSTEM
+- I2S7
+0x02450000 0x0245ffff
+- SYSTEM
+- I2S8
+0x02460000 0x0246ffff
+- SYSTEM
+- MPHY_L0
+0x02470000 0x0247ffff
+- SYSTEM
+- MPHY_L1
+0x02480000 0x0248ffff
+- SYSTEM
+- MISC_ERR_COLLATOR
+0x024e0000 0x024effff
+- SYSTEM
+- PROTO
+0x024f0000 0x024fffff
+- SYSTEM
+- UFSHC_0
+0x02500000 0x0252ffff
+- SYSTEM
+- UFSHC_0_MMIO
+0x02500000 0x0250ffff
+- SYSTEM
+- UFSHC_0_UNIPRO
+0x02510000 0x0251ffff
+- SYSTEM
+- UFSHC_0_UNIPRO_AUX
+0x02510000 0x02517fff
+- SYSTEM
+- UFSHC_0_UNIPRO_FPGA
+0x02518000 0x0251ffff
+- SYSTEM
+- UFSHC_0_VIRT
+0x02520000 0x0252ffff
+- SYSTEM
+- GPCDMA
+0x02600000 0x0280ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- GPCDMA_COMMON_0
+0x02600000 0x0260ffff
+- SYSTEM
+- GPCDMA_CH0
+0x02610000 0x0261ffff
+- SYSTEM
+- GPCDMA_CH1
+0x02620000 0x0262ffff
+- SYSTEM
+- GPCDMA_CH2
+0x02630000 0x0263ffff
+- SYSTEM
+- GPCDMA_CH3
+0x02640000 0x0264ffff
+- SYSTEM
+- GPCDMA_CH4
+0x02650000 0x0265ffff
+- SYSTEM
+- GPCDMA_CH5
+0x02660000 0x0266ffff
+- SYSTEM
+- GPCDMA_CH6
+0x02670000 0x0267ffff
+- SYSTEM
+- GPCDMA_CH7
+0x02680000 0x0268ffff
+- SYSTEM
+- GPCDMA_CH8
+0x02690000 0x0269ffff
+- SYSTEM
+- GPCDMA_CH9
+0x026a0000 0x026affff
+- SYSTEM
+- GPCDMA_CH10
+0x026b0000 0x026bffff
+- SYSTEM
+- GPCDMA_CH11
+0x026c0000 0x026cffff
+- SYSTEM
+- GPCDMA_CH12
+0x026d0000 0x026dffff
+- SYSTEM
+- GPCDMA_CH13
+0x026e0000 0x026effff
+- SYSTEM
+- GPCDMA_CH14
+0x026f0000 0x026fffff
+- SYSTEM
+- GPCDMA_CH15
+0x02700000 0x0270ffff
+- SYSTEM
+- GPCDMA_CH16
+0x02710000 0x0271ffff
+- SYSTEM
+- GPCDMA_CH17
+0x02720000 0x0272ffff
+- SYSTEM
+- GPCDMA_CH18
+0x02730000 0x0273ffff
+- SYSTEM
+- GPCDMA_CH19
+0x02740000 0x0274ffff
+- SYSTEM
+- GPCDMA_CH20
+0x02750000 0x0275ffff
+- SYSTEM
+- GPCDMA_CH21
+0x02760000 0x0276ffff
+- SYSTEM
+- GPCDMA_CH22
+0x02770000 0x0277ffff
+- SYSTEM
+- GPCDMA_CH23
+0x02780000 0x0278ffff
+- SYSTEM
+- GPCDMA_CH24
+0x02790000 0x0279ffff
+- SYSTEM
+- GPCDMA_CH25
+0x027a0000 0x027affff
+- SYSTEM
+- GPCDMA_CH26
+0x027b0000 0x027bffff
+- SYSTEM
+- GPCDMA_CH27
+0x027c0000 0x027cffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- GPCDMA_CH28
+0x027d0000 0x027dffff
+- SYSTEM
+- GPCDMA_CH29
+0x027e0000 0x027effff
+- SYSTEM
+- GPCDMA_CH30
+0x027f0000 0x027fffff
+- SYSTEM
+- GPCDMA_CH31
+0x02800000 0x0280ffff
+- SYSTEM
+- APE
+0x02900000 0x02afffff
+- SYSTEM
+- AHUB
+0x02900000 0x0291ffff
+- SYSTEM
+- AXBAR
+0x02900800 0x02900fff
+- SYSTEM
+- I2S1
+0x02901000 0x029010ff
+- SYSTEM
+- I2S2
+0x02901100 0x029011ff
+- SYSTEM
+- I2S3
+0x02901200 0x029012ff
+- SYSTEM
+- I2S4
+0x02901300 0x029013ff
+- SYSTEM
+- I2S5
+0x02901400 0x029014ff
+- SYSTEM
+- I2S6
+0x02901500 0x029015ff
+- SYSTEM
+- SFC1
+0x02902000 0x029021ff
+- SYSTEM
+- SFC2
+0x02902200 0x029023ff
+- SYSTEM
+- SFC3
+0x02902400 0x029025ff
+- SYSTEM
+- SFC4
+0x02902600 0x029027ff
+- SYSTEM
+- AMX1
+0x02903000 0x029030ff
+- SYSTEM
+- AMX2
+0x02903100 0x029031ff
+- SYSTEM
+- AMX3
+0x02903200 0x029032ff
+- SYSTEM
+- AMX4
+0x02903300 0x029033ff
+- SYSTEM
+- ADX1
+0x02903800 0x029038ff
+- SYSTEM
+- ADX2
+0x02903900 0x029039ff
+- SYSTEM
+- ADX3
+0x02903a00 0x02903aff
+- SYSTEM
+- ADX4
+0x02903b00 0x02903bff
+- SYSTEM
+- DMIC1
+0x02904000 0x029040ff
+- SYSTEM
+- DMIC2
+0x02904100 0x029041ff
+- SYSTEM
+- DMIC3
+0x02904200 0x029042ff
+- SYSTEM
+- DMIC4
+0x02904300 0x029043ff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- DSPK1
+0x02905000 0x029050ff
+- SYSTEM
+- DSPK2
+0x02905100 0x029051ff
+- SYSTEM
+- SPDIF1
+0x02906000 0x029061ff
+- SYSTEM
+- AFC1
+0x02907000 0x029070ff
+- SYSTEM
+- AFC2
+0x02907100 0x029071ff
+- SYSTEM
+- AFC3
+0x02907200 0x029072ff
+- SYSTEM
+- AFC4
+0x02907300 0x029073ff
+- SYSTEM
+- AFC5
+0x02907400 0x029074ff
+- SYSTEM
+- AFC6
+0x02907500 0x029075ff
+- SYSTEM
+- OPE1
+0x02908000 0x029083ff
+- SYSTEM
+- OPE1_COMMON
+0x02908000 0x029080ff
+- SYSTEM
+- OPE1_PEQ
+0x02908100 0x029081ff
+- SYSTEM
+- OPE1_MBDRC
+0x02908200 0x029083ff
+- SYSTEM
+- SPKPROT1
+0x02908c00 0x02908fff
+- SYSTEM
+- MVC1
+0x0290a000 0x0290a1ff
+- SYSTEM
+- MVC2
+0x0290a200 0x0290a3ff
+- SYSTEM
+- AHC
+0x0290b900 0x0290baff
+- SYSTEM
+- MIXER1
+0x0290bb00 0x0290c2ff
+- SYSTEM
+- IQC1
+0x0290e000 0x0290e1ff
+- SYSTEM
+- IQC2
+0x0290e200 0x0290e3ff
+- SYSTEM
+- ARAD
+0x0290e400 0x0290e7ff
+- SYSTEM
+- ADMAIF
+0x0290f000 0x0290ffff
+- SYSTEM
+- ASRC
+0x02910000 0x02911fff
+- SYSTEM
+- APE_ADMA
+0x02930000 0x0297ffff
+- SYSTEM
+- APE_ADMA_GLOBAL
+0x02930000 0x0293ffff
+- SYSTEM
+- APE_ADMA_PAGE1
+0x02940000 0x0294ffff
+- SYSTEM
+- APE_ADMA_PAGE2
+0x02950000 0x0295ffff
+- SYSTEM
+- APE_ADMA_PAGE3
+0x02960000 0x0296ffff
+- SYSTEM
+- APE_ADMA_PAGE4
+0x02970000 0x0297ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- APE_AMISC
+0x02990000 0x02991fff
+- SYSTEM
+- APE_AMISC_AMISC
+0x02990000 0x029907ff
+- SYSTEM
+- APE_AMISC_ACTMON
+0x02990800 0x02990bff
+- SYSTEM
+- APE_AMC
+0x02993000 0x02993fff
+- SYSTEM
+- APE_ACAST
+0x02994000 0x02995fff
+- SYSTEM
+- APE_ADAST
+0x02996000 0x02997fff
+- SYSTEM
+- APE_HSP
+0x029a0000 0x02a2ffff
+- SYSTEM
+- APE_HSP_COMMON
+0x029a0000 0x029affff
+- SYSTEM
+- APE_HSP_SM
+0x029b0000 0x029effff
+- SYSTEM
+- APE_HSP_SM_0_1
+0x029b0000 0x029bffff
+- SYSTEM
+- APE_HSP_SM_2_3
+0x029c0000 0x029cffff
+- SYSTEM
+- APE_HSP_SM_4_5
+0x029d0000 0x029dffff
+- SYSTEM
+- APE_HSP_SM_6_7
+0x029e0000 0x029effff
+- SYSTEM
+- APE_HSP_SS
+0x029f0000 0x02a2ffff
+- SYSTEM
+- APE_HSP_SS_0
+0x029f0000 0x029fffff
+- SYSTEM
+- APE_HSP_SS_1
+0x02a00000 0x02a0ffff
+- SYSTEM
+- APE_HSP_SS_2
+0x02a10000 0x02a1ffff
+- SYSTEM
+- APE_HSP_SS_3
+0x02a20000 0x02a2ffff
+- SYSTEM
+- APE_AGIC
+0x02a40000 0x02a7ffff
+- SYSTEM
+- APE_AGIC_PAGE0
+0x02a40000 0x02a4ffff
+- SYSTEM
+- APE_AGIC_PAGE1
+0x02a50000 0x02a5ffff
+- SYSTEM
+- APE_AGIC_PAGE2
+0x02a60000 0x02a6ffff
+- SYSTEM
+- APE_AGIC_PAGE3
+0x02a70000 0x02a7ffff
+- SYSTEM
+- APE_TKE
+0x02a80000 0x02adffff
+- SYSTEM
+- APE_TKE_SHARED
+0x02a80000 0x02a8ffff
+- SYSTEM
+- APE_TKE_TMR
+0x02a90000 0x02acffff
+- SYSTEM
+- APE_TKE_TMR_0
+0x02a90000 0x02a9ffff
+- SYSTEM
+- APE_TKE_TMR_1
+0x02aa0000 0x02aaffff
+- SYSTEM
+- APE_TKE_TMR_2
+0x02ab0000 0x02abffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- APE_TKE_TMR_3
+0x02ac0000 0x02acffff
+- SYSTEM
+- APE_TKE_WDT
+0x02ad0000 0x02adffff
+- SYSTEM
+- APE_TKE_WDT_0
+0x02ad0000 0x02adffff
+- SYSTEM
+- TSA_NODE_128
+0x02b00000 0x02b00fff
+- SYSTEM
+- TSA_NODE_129
+0x02b01000 0x02b01fff
+- SYSTEM
+- TSA_NODE_130
+0x02b02000 0x02b02fff
+- SYSTEM
+- TSA_NODE_131
+0x02b03000 0x02b03fff
+- SYSTEM
+- TSA_NODE_132
+0x02b04000 0x02b04fff
+- SYSTEM
+- TSA_NODE_133
+0x02b05000 0x02b05fff
+- SYSTEM
+- TSA_NODE_134
+0x02b06000 0x02b06fff
+- SYSTEM
+- TSA_NODE_135
+0x02b07000 0x02b07fff
+- SYSTEM
+- TSA_NODE_136
+0x02b08000 0x02b08fff
+- SYSTEM
+- TSA_NODE_137
+0x02b09000 0x02b09fff
+- SYSTEM
+- TSA_NODE_138
+0x02b0a000 0x02b0afff
+- SYSTEM
+- TSA_NODE_139
+0x02b0b000 0x02b0bfff
+- SYSTEM
+- TSA_NODE_140
+0x02b0c000 0x02b0cfff
+- SYSTEM
+- TSA_NODE_141
+0x02b0d000 0x02b0dfff
+- SYSTEM
+- TSA_NODE_142
+0x02b0e000 0x02b0efff
+- SYSTEM
+- TSA_NODE_143
+0x02b0f000 0x02b0ffff
+- SYSTEM
+- TSA_NODE_144
+0x02b10000 0x02b10fff
+- SYSTEM
+- TSA_NODE_145
+0x02b11000 0x02b11fff
+- SYSTEM
+- TSA_NODE_146
+0x02b12000 0x02b12fff
+- SYSTEM
+- TSA_NODE_147
+0x02b13000 0x02b13fff
+- SYSTEM
+- TSA_NODE_148
+0x02b14000 0x02b14fff
+- SYSTEM
+- TSA_NODE_149
+0x02b15000 0x02b15fff
+- SYSTEM
+- TSA_NODE_150
+0x02b16000 0x02b16fff
+- SYSTEM
+- TSA_NODE_151
+0x02b17000 0x02b17fff
+- SYSTEM
+- TSA_NODE_152
+0x02b18000 0x02b18fff
+- SYSTEM
+- TSA_NODE_153
+0x02b19000 0x02b19fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- TSA_NODE_154
+0x02b1a000 0x02b1afff
+- SYSTEM
+- TSA_NODE_155
+0x02b1b000 0x02b1bfff
+- SYSTEM
+- TSA_NODE_156
+0x02b1c000 0x02b1cfff
+- SYSTEM
+- TSA_NODE_157
+0x02b1d000 0x02b1dfff
+- SYSTEM
+- TSA_NODE_158
+0x02b1e000 0x02b1efff
+- SYSTEM
+- TSA_NODE_159
+0x02b1f000 0x02b1ffff
+- SYSTEM
+- TSA_NODE_160
+0x02b20000 0x02b20fff
+- SYSTEM
+- TSA_NODE_161
+0x02b21000 0x02b21fff
+- SYSTEM
+- TSA_NODE_162
+0x02b22000 0x02b22fff
+- SYSTEM
+- TSA_NODE_163
+0x02b23000 0x02b23fff
+- SYSTEM
+- TSA_NODE_164
+0x02b24000 0x02b24fff
+- SYSTEM
+- TSA_NODE_165
+0x02b25000 0x02b25fff
+- SYSTEM
+- TSA_NODE_166
+0x02b26000 0x02b26fff
+- SYSTEM
+- TSA_NODE_167
+0x02b27000 0x02b27fff
+- SYSTEM
+- TSA_NODE_168
+0x02b28000 0x02b28fff
+- SYSTEM
+- TSA_NODE_169
+0x02b29000 0x02b29fff
+- SYSTEM
+- TSA_NODE_170
+0x02b2a000 0x02b2afff
+- SYSTEM
+- TSA_NODE_171
+0x02b2b000 0x02b2bfff
+- SYSTEM
+- TSA_NODE_172
+0x02b2c000 0x02b2cfff
+- SYSTEM
+- TSA_NODE_173
+0x02b2d000 0x02b2dfff
+- SYSTEM
+- TSA_NODE_174
+0x02b2e000 0x02b2efff
+- SYSTEM
+- TSA_NODE_175
+0x02b2f000 0x02b2ffff
+- SYSTEM
+- TSA_NODE_176
+0x02b30000 0x02b30fff
+- SYSTEM
+- TSA_NODE_177
+0x02b31000 0x02b31fff
+- SYSTEM
+- TSA_NODE_178
+0x02b32000 0x02b32fff
+- SYSTEM
+- TSA_NODE_179
+0x02b33000 0x02b33fff
+- SYSTEM
+- TSA_NODE_180
+0x02b34000 0x02b34fff
+- SYSTEM
+- TSA_NODE_181
+0x02b35000 0x02b35fff
+- SYSTEM
+- TSA_NODE_182
+0x02b36000 0x02b36fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- TSA_NODE_183
+0x02b37000 0x02b37fff
+- SYSTEM
+- TSA_NODE_184
+0x02b38000 0x02b38fff
+- SYSTEM
+- TSA_NODE_185
+0x02b39000 0x02b39fff
+- SYSTEM
+- TSA_NODE_186
+0x02b3a000 0x02b3afff
+- SYSTEM
+- TSA_NODE_187
+0x02b3b000 0x02b3bfff
+- SYSTEM
+- TSA_NODE_188
+0x02b3c000 0x02b3cfff
+- SYSTEM
+- TSA_NODE_189
+0x02b3d000 0x02b3dfff
+- SYSTEM
+- TSA_NODE_190
+0x02b3e000 0x02b3efff
+- SYSTEM
+- TSA_NODE_191
+0x02b3f000 0x02b3ffff
+- SYSTEM
+- TSA_NODE_192
+0x02b40000 0x02b40fff
+- SYSTEM
+- TSA_NODE_193
+0x02b41000 0x02b41fff
+- SYSTEM
+- TSA_NODE_194
+0x02b42000 0x02b42fff
+- SYSTEM
+- TSA_NODE_195
+0x02b43000 0x02b43fff
+- SYSTEM
+- TSA_NODE_196
+0x02b44000 0x02b44fff
+- SYSTEM
+- TSA_NODE_197
+0x02b45000 0x02b45fff
+- SYSTEM
+- TSA_NODE_198
+0x02b46000 0x02b46fff
+- SYSTEM
+- TSA_NODE_199
+0x02b47000 0x02b47fff
+- SYSTEM
+- TSA_NODE_200
+0x02b48000 0x02b48fff
+- SYSTEM
+- TSA_NODE_201
+0x02b49000 0x02b49fff
+- SYSTEM
+- TSA_NODE_202
+0x02b4a000 0x02b4afff
+- SYSTEM
+- TSA_NODE_203
+0x02b4b000 0x02b4bfff
+- SYSTEM
+- TSA_NODE_204
+0x02b4c000 0x02b4cfff
+- SYSTEM
+- TSA_NODE_205
+0x02b4d000 0x02b4dfff
+- SYSTEM
+- TSA_NODE_206
+0x02b4e000 0x02b4efff
+- SYSTEM
+- TSA_NODE_207
+0x02b4f000 0x02b4ffff
+- SYSTEM
+- TSA_NODE_208
+0x02b50000 0x02b50fff
+- SYSTEM
+- TSA_NODE_209
+0x02b51000 0x02b51fff
+- SYSTEM
+- TSA_NODE_210
+0x02b52000 0x02b52fff
+- SYSTEM
+- TSA_NODE_211
+0x02b53000 0x02b53fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- TSA_NODE_212
+0x02b54000 0x02b54fff
+- SYSTEM
+- TSA_NODE_213
+0x02b55000 0x02b55fff
+- SYSTEM
+- TSA_NODE_214
+0x02b56000 0x02b56fff
+- SYSTEM
+- TSA_NODE_215
+0x02b57000 0x02b57fff
+- SYSTEM
+- TSA_NODE_216
+0x02b58000 0x02b58fff
+- SYSTEM
+- TSA_NODE_217
+0x02b59000 0x02b59fff
+- SYSTEM
+- TSA_NODE_218
+0x02b5a000 0x02b5afff
+- SYSTEM
+- TSA_NODE_219
+0x02b5b000 0x02b5bfff
+- SYSTEM
+- TSA_NODE_220
+0x02b5c000 0x02b5cfff
+- SYSTEM
+- TSA_NODE_221
+0x02b5d000 0x02b5dfff
+- SYSTEM
+- TSA_NODE_222
+0x02b5e000 0x02b5efff
+- SYSTEM
+- TSA_NODE_223
+0x02b5f000 0x02b5ffff
+- SYSTEM
+- TSA_NODE_224
+0x02b60000 0x02b60fff
+- SYSTEM
+- TSA_NODE_225
+0x02b61000 0x02b61fff
+- SYSTEM
+- TSA_NODE_226
+0x02b62000 0x02b62fff
+- SYSTEM
+- TSA_NODE_227
+0x02b63000 0x02b63fff
+- SYSTEM
+- TSA_NODE_228
+0x02b64000 0x02b64fff
+- SYSTEM
+- TSA_NODE_229
+0x02b65000 0x02b65fff
+- SYSTEM
+- TSA_NODE_230
+0x02b66000 0x02b66fff
+- SYSTEM
+- TSA_NODE_231
+0x02b67000 0x02b67fff
+- SYSTEM
+- TSA_NODE_232
+0x02b68000 0x02b68fff
+- SYSTEM
+- TSA_NODE_233
+0x02b69000 0x02b69fff
+- SYSTEM
+- TSA_NODE_234
+0x02b6a000 0x02b6afff
+- SYSTEM
+- TSA_NODE_235
+0x02b6b000 0x02b6bfff
+- SYSTEM
+- TSA_NODE_236
+0x02b6c000 0x02b6cfff
+- SYSTEM
+- TSA_NODE_237
+0x02b6d000 0x02b6dfff
+- SYSTEM
+- TSA_NODE_238
+0x02b6e000 0x02b6efff
+- SYSTEM
+- TSA_NODE_239
+0x02b6f000 0x02b6ffff
+- SYSTEM
+- TSA_NODE_240
+0x02b70000 0x02b70fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- TSA_NODE_241
+0x02b71000 0x02b71fff
+- SYSTEM
+- TSA_NODE_242
+0x02b72000 0x02b72fff
+- SYSTEM
+- TSA_NODE_243
+0x02b73000 0x02b73fff
+- SYSTEM
+- TSA_NODE_244
+0x02b74000 0x02b74fff
+- SYSTEM
+- TSA_NODE_245
+0x02b75000 0x02b75fff
+- SYSTEM
+- TSA_NODE_246
+0x02b76000 0x02b76fff
+- SYSTEM
+- TSA_NODE_247
+0x02b77000 0x02b77fff
+- SYSTEM
+- TSA_NODE_248
+0x02b78000 0x02b78fff
+- SYSTEM
+- TSA_NODE_249
+0x02b79000 0x02b79fff
+- SYSTEM
+- TSA_NODE_250
+0x02b7a000 0x02b7afff
+- SYSTEM
+- TSA_NODE_251
+0x02b7b000 0x02b7bfff
+- SYSTEM
+- TSA_NODE_252
+0x02b7c000 0x02b7cfff
+- SYSTEM
+- TSA_NODE_253
+0x02b7d000 0x02b7dfff
+- SYSTEM
+- TSA_NODE_254
+0x02b7e000 0x02b7efff
+- SYSTEM
+- TSA_NODE_255
+0x02b7f000 0x02b7ffff
+- SYSTEM
+- MSS_1
+0x02b80000 0x02bfffff
+- SYSTEM
+- MC4
+0x02b80000 0x02b8ffff
+- SYSTEM
+- MC5
+0x02b90000 0x02b9ffff
+- SYSTEM
+- MC6
+0x02ba0000 0x02baffff
+- SYSTEM
+- MC7
+0x02bb0000 0x02bbffff
+- SYSTEM
+- MSS
+0x02c00000 0x02cfffff
+- SYSTEM
+- MC_SID
+0x02c00000 0x02c0ffff
+- SYSTEM
+- MCB
+0x02c10000 0x02c1ffff
+- SYSTEM
+- MC0
+0x02c20000 0x02c2ffff
+- SYSTEM
+- MC1
+0x02c30000 0x02c3ffff
+- SYSTEM
+- MC2
+0x02c40000 0x02c4ffff
+- SYSTEM
+- MC3
+0x02c50000 0x02c5ffff
+- SYSTEM
+- EMCB
+0x02c60000 0x02c6ffff
+- SYSTEM
+- EMCB_CORE
+0x02c60000 0x02c60fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- EMCB_CFG
+0x02c61000 0x02c61fff
+- SYSTEM
+- EMCB_EC
+0x02c62000 0x02c62fff
+- SYSTEM
+- EMCB_TR
+0x02c63000 0x02c63fff
+- SYSTEM
+- EMCB_MISC
+0x02c64000 0x02c6ffff
+- SYSTEM
+- EMC0
+0x02c70000 0x02c7ffff
+- SYSTEM
+- EMC0_CORE
+0x02c70000 0x02c70fff
+- SYSTEM
+- EMC0_CFG
+0x02c71000 0x02c71fff
+- SYSTEM
+- EMC0_EC
+0x02c72000 0x02c72fff
+- SYSTEM
+- EMC0_TR
+0x02c73000 0x02c73fff
+- SYSTEM
+- EMC0_MISC
+0x02c74000 0x02c7ffff
+- SYSTEM
+- EMC1
+0x02c80000 0x02c8ffff
+- SYSTEM
+- EMC1_CORE
+0x02c80000 0x02c80fff
+- SYSTEM
+- EMC1_CFG
+0x02c81000 0x02c81fff
+- SYSTEM
+- EMC1_EC
+0x02c82000 0x02c82fff
+- SYSTEM
+- EMC1_TR
+0x02c83000 0x02c83fff
+- SYSTEM
+- EMC1_MISC
+0x02c84000 0x02c8ffff
+- SYSTEM
+- EMC2
+0x02c90000 0x02c9ffff
+- SYSTEM
+- EMC2_CORE
+0x02c90000 0x02c90fff
+- SYSTEM
+- EMC2_CFG
+0x02c91000 0x02c91fff
+- SYSTEM
+- EMC2_EC
+0x02c92000 0x02c92fff
+- SYSTEM
+- EMC2_TR
+0x02c93000 0x02c93fff
+- SYSTEM
+- EMC2_MISC
+0x02c94000 0x02c9ffff
+- SYSTEM
+- EMC3
+0x02ca0000 0x02caffff
+- SYSTEM
+- EMC3_CORE
+0x02ca0000 0x02ca0fff
+- SYSTEM
+- EMC3_CFG
+0x02ca1000 0x02ca1fff
+- SYSTEM
+- EMC3_EC
+0x02ca2000 0x02ca2fff
+- SYSTEM
+- EMC3_TR
+0x02ca3000 0x02ca3fff
+- SYSTEM
+- EMC3_MISC
+0x02ca4000 0x02caffff
+- SYSTEM
+- EMC4
+0x02cb0000 0x02cbffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- EMC4_CORE
+0x02cb0000 0x02cb0fff
+- SYSTEM
+- EMC4_CFG
+0x02cb1000 0x02cb1fff
+- SYSTEM
+- EMC4_EC
+0x02cb2000 0x02cb2fff
+- SYSTEM
+- EMC4_TR
+0x02cb3000 0x02cb3fff
+- SYSTEM
+- EMC4_MISC
+0x02cb4000 0x02cbffff
+- SYSTEM
+- EMC5
+0x02cc0000 0x02ccffff
+- SYSTEM
+- EMC5_CORE
+0x02cc0000 0x02cc0fff
+- SYSTEM
+- EMC5_CFG
+0x02cc1000 0x02cc1fff
+- SYSTEM
+- EMC5_EC
+0x02cc2000 0x02cc2fff
+- SYSTEM
+- EMC5_TR
+0x02cc3000 0x02cc3fff
+- SYSTEM
+- EMC5_MISC
+0x02cc4000 0x02ccffff
+- SYSTEM
+- EMC6
+0x02cd0000 0x02cdffff
+- SYSTEM
+- EMC6_CORE
+0x02cd0000 0x02cd0fff
+- SYSTEM
+- EMC6_CFG
+0x02cd1000 0x02cd1fff
+- SYSTEM
+- EMC6_EC
+0x02cd2000 0x02cd2fff
+- SYSTEM
+- EMC6_TR
+0x02cd3000 0x02cd3fff
+- SYSTEM
+- EMC6_MISC
+0x02cd4000 0x02cdffff
+- SYSTEM
+- EMC7
+0x02ce0000 0x02ceffff
+- SYSTEM
+- EMC7_CORE
+0x02ce0000 0x02ce0fff
+- SYSTEM
+- EMC7_CFG
+0x02ce1000 0x02ce1fff
+- SYSTEM
+- EMC7_EC
+0x02ce2000 0x02ce2fff
+- SYSTEM
+- EMC7_TR
+0x02ce3000 0x02ce3fff
+- SYSTEM
+- EMC7_MISC
+0x02ce4000 0x02ceffff
+- SYSTEM
+- MSS_QUAL
+0x02cf0000 0x02cfffff
+- SYSTEM
+- UPHY_0
+0x02d00000 0x02d01fff
+- SYSTEM
+- UPHY_PLL0
+0x02d00000 0x02d01fff
+- SYSTEM
+- UPHY_1
+0x02d02000 0x02d03fff
+- SYSTEM
+- UPHY_LANE0
+0x02d02000 0x02d02fff
+- SYSTEM
+- UPHY_LANE1
+0x02d03000 0x02d03fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- UPHY_2
+0x02d04000 0x02d05fff
+- SYSTEM
+- UPHY_PLL1
+0x02d04000 0x02d05fff
+- SYSTEM
+- UPHY_3
+0x02d06000 0x02d07fff
+- SYSTEM
+- UPHY_LANE2
+0x02d06000 0x02d06fff
+- SYSTEM
+- UPHY_LANE3
+0x02d07000 0x02d07fff
+- SYSTEM
+- UPHY_4
+0x02d08000 0x02d09fff
+- SYSTEM
+- UPHY_PLL2
+0x02d08000 0x02d09fff
+- SYSTEM
+- UPHY_5
+0x02d0a000 0x02d0bfff
+- SYSTEM
+- UPHY_LANE4
+0x02d0a000 0x02d0afff
+- SYSTEM
+- UPHY_LANE5
+0x02d0b000 0x02d0bfff
+- SYSTEM
+- UPHY_6
+0x02d0c000 0x02d0dfff
+- SYSTEM
+- UPHY_LANE6
+0x02d0c000 0x02d0cfff
+- SYSTEM
+- UPHY_LANE7
+0x02d0d000 0x02d0dfff
+- SYSTEM
+- UPHY_7
+0x02d0e000 0x02d0ffff
+- SYSTEM
+- UPHY_PLL3
+0x02d0e000 0x02d0ffff
+- SYSTEM
+- NVHSUPHY_0
+0x02f00000 0x02f01fff
+- SYSTEM
+- NVHSUPHY_PLL0
+0x02f00000 0x02f01fff
+- SYSTEM
+- NVHSUPHY_1
+0x02f02000 0x02f03fff
+- SYSTEM
+- NVHSUPHY_LANE0
+0x02f02000 0x02f02fff
+- SYSTEM
+- NVHSUPHY_LANE1
+0x02f03000 0x02f03fff
+- SYSTEM
+- NVHSUPHY_2
+0x02f04000 0x02f05fff
+- SYSTEM
+- NVHSUPHY_LANE2
+0x02f04000 0x02f04fff
+- SYSTEM
+- NVHSUPHY_LANE3
+0x02f05000 0x02f05fff
+- SYSTEM
+- NVHSUPHY_3
+0x02f06000 0x02f07fff
+- SYSTEM
+- NVHSUPHY_LANE4
+0x02f06000 0x02f06fff
+- SYSTEM
+- NVHSUPHY_LANE5
+0x02f07000 0x02f07fff
+- SYSTEM
+- NVHSUPHY_4
+0x02f08000 0x02f09fff
+- SYSTEM
+- NVHSUPHY_LANE6
+0x02f08000 0x02f08fff
+- SYSTEM
+- NVHSUPHY_LANE7
+0x02f09000 0x02f09fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- NVHSUPHY_5
+0x02f0a000 0x02f0bfff
+- SYSTEM
+- NVHSUPHY_PLL1
+0x02f0a000 0x02f0bfff
+- SYSTEM
+- LIC
+0x03000000 0x0300ffff
+- SYSTEM
+- LIC_CH0
+0x03000000 0x030007ff
+- SYSTEM
+- LIC_CH1
+0x03000800 0x03000fff
+- SYSTEM
+- LIC_CH2
+0x03001000 0x030017ff
+- SYSTEM
+- LIC_CH3
+0x03001800 0x03001fff
+- SYSTEM
+- LIC_CH4
+0x03002000 0x030027ff
+- SYSTEM
+- LIC_CH5
+0x03002800 0x03002fff
+- SYSTEM
+- LIC_CH6
+0x03003000 0x030037ff
+- SYSTEM
+- LIC_CH7
+0x03003800 0x03003fff
+- SYSTEM
+- LIC_CH8
+0x03004000 0x030047ff
+- SYSTEM
+- LIC_CH9
+0x03004800 0x03004fff
+- SYSTEM
+- LIC_CH10
+0x03005000 0x030057ff
+- SYSTEM
+- LIC_CH11
+0x03005800 0x03005fff
+- SYSTEM
+- LIC_COMMON
+0x0300f800 0x0300ffff
+- SYSTEM
+- UARTA
+0x03100000 0x0310ffff
+- SYSTEM
+- UARTB
+0x03110000 0x0311ffff
+- SYSTEM
+- UARTD
+0x03130000 0x0313ffff
+- SYSTEM
+- UARTE
+0x03140000 0x0314ffff
+- SYSTEM
+- UARTF
+0x03150000 0x0315ffff
+- SYSTEM
+- I2C1
+0x03160000 0x0316ffff
+- SYSTEM
+- UARTH
+0x03170000 0x0317ffff
+- SYSTEM
+- I2C3
+0x03180000 0x0318ffff
+- SYSTEM
+- I2C4
+0x03190000 0x0319ffff
+- SYSTEM
+- I2C5
+0x031a0000 0x031affff
+- SYSTEM
+- I2C6
+0x031b0000 0x031bffff
+- SYSTEM
+- I2C7
+0x031c0000 0x031cffff
+- SYSTEM
+- UARTI
+0x031d0000 0x031dffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- I2C9
+0x031e0000 0x031effff
+- SYSTEM
+- SPI1
+0x03210000 0x0321ffff
+- SYSTEM
+- SPI3
+0x03230000 0x0323ffff
+- SYSTEM
+- SPI4
+0x03240000 0x0324ffff
+- SYSTEM
+- SPI5
+0x03250000 0x0325ffff
+- SYSTEM
+- QSPI0
+0x03270000 0x0327ffff
+- SYSTEM
+- PWM1
+0x03280000 0x0328ffff
+- SYSTEM
+- PWM2
+0x03290000 0x0329ffff
+- SYSTEM
+- PWM3
+0x032a0000 0x032affff
+- SYSTEM
+- PWM5
+0x032c0000 0x032cffff
+- SYSTEM
+- PWM6
+0x032d0000 0x032dffff
+- SYSTEM
+- PWM7
+0x032e0000 0x032effff
+- SYSTEM
+- PWM8
+0x032f0000 0x032fffff
+- SYSTEM
+- QSPI1
+0x03300000 0x0330ffff
+- SYSTEM
+- SDMMC1
+0x03400000 0x0341ffff
+- SYSTEM
+- SDMMC1_IMPL
+0x03400000 0x0340ffff
+- SYSTEM
+- SDMMC1B
+0x03410000 0x0341ffff
+- SYSTEM
+- SDMMC4
+0x03460000 0x0347ffff
+- SYSTEM
+- SDMMC4_IMPL
+0x03460000 0x0346ffff
+- SYSTEM
+- SDMMC4B
+0x03470000 0x0347ffff
+- SYSTEM
+- HDA
+0x03510000 0x0351ffff
+- SYSTEM
+- XUSB_PADCTL
+0x03520000 0x0353ffff
+- SYSTEM
+- XUSB_PADCTL_NONSECURE
+0x03520000 0x0352ffff
+- SYSTEM
+- XUSB_PADCTL_SECURE
+0x03530000 0x0353ffff
+- SYSTEM
+- XUSB_AO
+0x03540000 0x0354ffff
+- SYSTEM
+- XUSB_DEV
+0x03550000 0x0355ffff
+- SYSTEM
+- XUSB_DEV_BAR0
+0x03550000 0x03557fff
+- SYSTEM
+- XUSB_DEV_CFG
+0x03558000 0x0355ffff
+- SYSTEM
+- XUSB_HOST
+0x03600000 0x0379ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- XUSB_HOST_PF
+0x03600000 0x0365ffff
+- SYSTEM
+- XUSB_HOST_PF_CFG
+0x03600000 0x0360ffff
+- SYSTEM
+- XUSB_HOST_PF_BAR0
+0x03610000 0x0364ffff
+- SYSTEM
+- XUSB_HOST_PF_BAR0_OP
+0x03610000 0x0362ffff
+- SYSTEM
+- XUSB_HOST_PF_BAR0_RT
+0x03630000 0x0363ffff
+- SYSTEM
+- XUSB_HOST_PF_BAR0_DB
+0x03640000 0x0364ffff
+- SYSTEM
+- XUSB_HOST_PF_BAR2
+0x03650000 0x0365ffff
+- SYSTEM
+- XUSB_HOST_VF0
+0x03660000 0x036affff
+- SYSTEM
+- XUSB_HOST_VF0_CFG
+0x03660000 0x0366ffff
+- SYSTEM
+- XUSB_HOST_VF0_BAR0
+0x03670000 0x036affff
+- SYSTEM
+- XUSB_HOST_VF0_BAR0_OP
+0x03670000 0x0368ffff
+- SYSTEM
+- XUSB_HOST_VF0_BAR0_RT
+0x03690000 0x0369ffff
+- SYSTEM
+- XUSB_HOST_VF0_BAR0_DB
+0x036a0000 0x036affff
+- SYSTEM
+- XUSB_HOST_VF1
+0x036b0000 0x036fffff
+- SYSTEM
+- XUSB_HOST_VF1_CFG
+0x036b0000 0x036bffff
+- SYSTEM
+- XUSB_HOST_VF1_BAR0
+0x036c0000 0x036fffff
+- SYSTEM
+- XUSB_HOST_VF1_BAR0_OP
+0x036c0000 0x036dffff
+- SYSTEM
+- XUSB_HOST_VF1_BAR0_RT
+0x036e0000 0x036effff
+- SYSTEM
+- XUSB_HOST_VF1_BAR0_DB
+0x036f0000 0x036fffff
+- SYSTEM
+- XUSB_HOST_VF2
+0x03700000 0x0374ffff
+- SYSTEM
+- XUSB_HOST_VF2_CFG
+0x03700000 0x0370ffff
+- SYSTEM
+- XUSB_HOST_VF2_BAR0
+0x03710000 0x0374ffff
+- SYSTEM
+- XUSB_HOST_VF2_BAR0_OP
+0x03710000 0x0372ffff
+- SYSTEM
+- XUSB_HOST_VF2_BAR0_RT
+0x03730000 0x0373ffff
+- SYSTEM
+- XUSB_HOST_VF2_BAR0_DB
+0x03740000 0x0374ffff
+- SYSTEM
+- XUSB_HOST_VF3
+0x03750000 0x0379ffff
+- SYSTEM
+- XUSB_HOST_VF3_CFG
+0x03750000 0x0375ffff
+- SYSTEM
+- XUSB_HOST_VF3_BAR0
+0x03760000 0x0379ffff
+- SYSTEM
+- XUSB_HOST_VF3_BAR0_OP
+0x03760000 0x0377ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- XUSB_HOST_VF3_BAR0_RT
+0x03780000 0x0378ffff
+- SYSTEM
+- XUSB_HOST_VF3_BAR0_DB
+0x03790000 0x0379ffff
+- SYSTEM
+- PEXCLK0
+0x037a0000 0x037a0fff
+- SYSTEM
+- PEXCLK2
+0x037a1000 0x037a1fff
+- SYSTEM
+- CV0_POD
+0x037a3000 0x037a3fff
+- SYSTEM
+- CV1_POD
+0x037a4000 0x037a4fff
+- SYSTEM
+- CV2_POD
+0x037a5000 0x037a5fff
+- SYSTEM
+- PEXCLK1
+0x037a7000 0x037a7fff
+- SYSTEM
+- MIOBFM
+0x03800000 0x0380ffff
+- SYSTEM
+- APB2JTAG
+0x03980000 0x0398ffff
+- SYSTEM
+- MIPI_CAL
+0x03990000 0x0399ffff
+- SYSTEM
+- TACH_1
+0x039b0000 0x039bffff
+- SYSTEM
+- TACH_0
+0x039c0000 0x039cffff
+- SYSTEM
+- IST
+0x03a60000 0x03a6ffff
+- SYSTEM
+- LIC_GTE0
+0x03aa0000 0x03aaffff
+- SYSTEM
+- LIC_GTE1
+0x03ab0000 0x03abffff
+- SYSTEM
+- FAKE_SW
+0x03b40000 0x03b4ffff
+- SYSTEM
+- FAKE_ETHERNET
+0x03b40000 0x03b400ff
+- SYSTEM
+- FAKE_RPC
+0x03b41000 0x03b41fff
+- SYSTEM
+- SEU1SE0
+0x03b50000 0x03b7ffff
+- SYSTEM
+- SEU1SAP_SFTY
+0x03b50000 0x03b5ffff
+- SYSTEM
+- SEU1SAP
+0x03b50000 0x03b5efff
+- SYSTEM
+- SEU1SFTY
+0x03b5f000 0x03b5ffff
+- SYSTEM
+- SEU1PKA1
+0x03b60000 0x03b6ffff
+- SYSTEM
+- SEU1RNG1
+0x03b70000 0x03b7ffff
+- SYSTEM
+- TOP0_HSP
+0x03c00000 0x03c9ffff
+- SYSTEM
+- TOP0_HSP_COMMON
+0x03c00000 0x03c0ffff
+- SYSTEM
+- TOP0_HSP_SM
+0x03c10000 0x03c4ffff
+- SYSTEM
+- TOP0_HSP_SM_0_1
+0x03c10000 0x03c1ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- TOP0_HSP_SM_2_3
+0x03c20000 0x03c2ffff
+- SYSTEM
+- TOP0_HSP_SM_4_5
+0x03c30000 0x03c3ffff
+- SYSTEM
+- TOP0_HSP_SM_6_7
+0x03c40000 0x03c4ffff
+- SYSTEM
+- TOP0_HSP_SS
+0x03c50000 0x03c6ffff
+- SYSTEM
+- TOP0_HSP_SS_0
+0x03c50000 0x03c5ffff
+- SYSTEM
+- TOP0_HSP_SS_1
+0x03c60000 0x03c6ffff
+- SYSTEM
+- TOP0_HSP_AS
+0x03c70000 0x03c8ffff
+- SYSTEM
+- TOP0_HSP_AS_0
+0x03c70000 0x03c7ffff
+- SYSTEM
+- TOP0_HSP_AS_1
+0x03c80000 0x03c8ffff
+- SYSTEM
+- TOP0_HSP_DB
+0x03c90000 0x03c9ffff
+- SYSTEM
+- TOP0_HSP_DB_0
+0x03c90000 0x03c9ffff
+- SYSTEM
+- TOP1_HSP
+0x03d00000 0x03d8ffff
+- SYSTEM
+- TOP1_HSP_COMMON
+0x03d00000 0x03d0ffff
+- SYSTEM
+- TOP1_HSP_SM
+0x03d10000 0x03d4ffff
+- SYSTEM
+- TOP1_HSP_SM_0_1
+0x03d10000 0x03d1ffff
+- SYSTEM
+- TOP1_HSP_SM_2_3
+0x03d20000 0x03d2ffff
+- SYSTEM
+- TOP1_HSP_SM_4_5
+0x03d30000 0x03d3ffff
+- SYSTEM
+- TOP1_HSP_SM_6_7
+0x03d40000 0x03d4ffff
+- SYSTEM
+- TOP1_HSP_SS
+0x03d50000 0x03d8ffff
+- SYSTEM
+- TOP1_HSP_SS_0
+0x03d50000 0x03d5ffff
+- SYSTEM
+- TOP1_HSP_SS_1
+0x03d60000 0x03d6ffff
+- SYSTEM
+- TOP1_HSP_SS_2
+0x03d70000 0x03d7ffff
+- SYSTEM
+- TOP1_HSP_SS_3
+0x03d80000 0x03d8ffff
+- SYSTEM
+- PIPE2UPHY
+0x03e00000 0x03ffffff
+- SYSTEM
+- P2U_HSIO_0
+0x03e00000 0x03e0ffff
+- SYSTEM
+- P2U_HSIO_1
+0x03e10000 0x03e1ffff
+- SYSTEM
+- P2U_HSIO_2
+0x03e20000 0x03e2ffff
+- SYSTEM
+- P2U_HSIO_3
+0x03e30000 0x03e3ffff
+- SYSTEM
+- P2U_HSIO_4
+0x03e40000 0x03e4ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- P2U_HSIO_5
+0x03e50000 0x03e5ffff
+- SYSTEM
+- P2U_HSIO_6
+0x03e60000 0x03e6ffff
+- SYSTEM
+- P2U_HSIO_7
+0x03e70000 0x03e7ffff
+- SYSTEM
+- P2U_HSIO_XBAR
+0x03e80000 0x03e8ffff
+- SYSTEM
+- P2U_NVHS_0
+0x03e90000 0x03e9ffff
+- SYSTEM
+- P2U_NVHS_1
+0x03ea0000 0x03eaffff
+- SYSTEM
+- P2U_NVHS_2
+0x03eb0000 0x03ebffff
+- SYSTEM
+- P2U_NVHS_3
+0x03ec0000 0x03ecffff
+- SYSTEM
+- P2U_NVHS_4
+0x03ed0000 0x03edffff
+- SYSTEM
+- P2U_NVHS_5
+0x03ee0000 0x03eeffff
+- SYSTEM
+- P2U_NVHS_6
+0x03ef0000 0x03efffff
+- SYSTEM
+- P2U_NVHS_7
+0x03f00000 0x03f0ffff
+- SYSTEM
+- P2U_NVHS_XBAR
+0x03f10000 0x03f1ffff
+- SYSTEM
+- P2U_GBE_0
+0x03f20000 0x03f2ffff
+- SYSTEM
+- P2U_GBE_1
+0x03f30000 0x03f3ffff
+- SYSTEM
+- P2U_GBE_2
+0x03f40000 0x03f4ffff
+- SYSTEM
+- P2U_GBE_3
+0x03f50000 0x03f5ffff
+- SYSTEM
+- P2U_GBE_4
+0x03f60000 0x03f6ffff
+- SYSTEM
+- P2U_GBE_5
+0x03f70000 0x03f7ffff
+- SYSTEM
+- P2U_GBE_6
+0x03f80000 0x03f8ffff
+- SYSTEM
+- P2U_GBE_7
+0x03f90000 0x03f9ffff
+- SYSTEM
+- P2U_GBE_XBAR
+0x03fa0000 0x03faffff
+- SYSTEM
+- EXIO
+0x06000000 0x063fffff
+- SYSTEM
+- MIOBFM_SPDIF
+0x06000000 0x060000ff
+- SYSTEM
+- MIOBFM_I2C
+0x06000100 0x060001ff
+- SYSTEM
+- MIOBFM_DIVISOR
+0x06000200 0x060002ff
+- SYSTEM
+- MIOBFM_UART
+0x06000300 0x060003ff
+- SYSTEM
+- MIOBFM_VFIR
+0x06000400 0x060004ff
+- SYSTEM
+- MIOBFM_DVC
+0x06000500 0x060005ff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- MIOBFM_XMB
+0x06000600 0x060006ff
+- SYSTEM
+- MIOBFM_SLINK
+0x06000700 0x060007ff
+- SYSTEM
+- MIOBFM_UCQ
+0x06000800 0x060008ff
+- SYSTEM
+- MIOBFM_PWM
+0x06000a00 0x06000aff
+- SYSTEM
+- MIOBFM_PUPD_GPIO
+0x06000b00 0x06000bff
+- SYSTEM
+- MIOBFM_MPM_GPIO
+0x06000c00 0x06000c7f
+- SYSTEM
+- MIOBFM_MPM_DPD
+0x06000c80 0x06000cff
+- SYSTEM
+- MIOBFM_TSENSOR
+0x06000d00 0x06000dff
+- SYSTEM
+- MIOBFM_USB
+0x06000e00 0x06000eff
+- SYSTEM
+- MIOBFM_OWL
+0x06001000 0x060010ff
+- SYSTEM
+- MIOBFM_HDA
+0x06001100 0x060011ff
+- SYSTEM
+- MIOBFM_I2S0
+0x06001200 0x060012ff
+- SYSTEM
+- MIOBFM_I2S1
+0x06001300 0x060013ff
+- SYSTEM
+- MIOBFM_SATA
+0x06001400 0x060014ff
+- SYSTEM
+- MIOBFM_PMC
+0x06001500 0x060015ff
+- SYSTEM
+- MIOBFM_CEC
+0x06001600 0x060016ff
+- SYSTEM
+- MIOBFM_I2S2
+0x06001700 0x060017ff
+- SYSTEM
+- MIOBFM_I2S3
+0x06001800 0x060018ff
+- SYSTEM
+- MIOBFM_I2S4
+0x06001900 0x060019ff
+- SYSTEM
+- MIOBFM_PCIE
+0x06001a00 0x06001aff
+- SYSTEM
+- MIOBFM_BBC
+0x06002000 0x060020ff
+- SYSTEM
+- MIOBFM_PINMUX
+0x06003000 0x06003fff
+- SYSTEM
+- MIOBFM_GPIO
+0x06008000 0x060083ff
+- SYSTEM
+- MIOBFM_SDMMC
+0x06008400 0x060084ff
+- SYSTEM
+- MIOBFM_AUDIO
+0x0600a080 0x0600a17f
+- SYSTEM
+- MIOBFM_HOST1X
+0x0600a200 0x0600a2ff
+- SYSTEM
+- MIOBFM_INTERRUPT
+0x0600a300 0x0600a37f
+- SYSTEM
+- MIOBFM_ORDER
+0x0600a380 0x0600a3ff
+- SYSTEM
+- MIOBFM_RTPRINT
+0x0600a400 0x0600a47f
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- MIOBFM_DTV
+0x0600a500 0x0600a5ff
+- SYSTEM
+- MIOBFM_QSPI
+0x0600a700 0x0600a7ff
+- SYSTEM
+- MIOBFM_CSITE
+0x0600a800 0x0600a8ff
+- SYSTEM
+- MIOBFM_SIMON
+0x0600a900 0x0600a9ff
+- SYSTEM
+- MIOBFM_DIRECTDC
+0x0600b000 0x0600b7ff
+- SYSTEM
+- MIOBFM_CAMERA
+0x0600b800 0x0600b9ff
+- SYSTEM
+- MIOBFM_EQOS
+0x0600ba00 0x0600baff
+- SYSTEM
+- MIOBFM_GEN_MEM
+0x0600c000 0x0600dfff
+- SYSTEM
+- MIOBFM_NVDISPLAY
+0x0600e000 0x0600e7ff
+- SYSTEM
+- MIOBFM_IST
+0x0600e800 0x0600e8ff
+- SYSTEM
+- MIOBFM_PMIC
+0x06010000 0x06011fff
+- SYSTEM
+- MIOBFM_CAR
+0x06012000 0x06015fff
+- SYSTEM
+- NITRO_IO
+0x06400000 0x06400fff
+- SYSTEM
+- MGBE0
+0x06800000 0x068fffff
+- SYSTEM
+- MGBE0_MAC
+0x06800000 0x0689ffff
+- SYSTEM
+- MGBE0_MAC_HV
+0x06800000 0x0680ffff
+- SYSTEM
+- MGBE0_MAC_RM
+0x06810000 0x0681ffff
+- SYSTEM
+- MGBE0_MAC_RM_CFG
+0x06810000 0x0681efff
+- SYSTEM
+- MGBE0_MAC_RM_ERR
+0x0681f000 0x0681ffff
+- SYSTEM
+- MGBE0_MAC_VM0
+0x06820000 0x0682ffff
+- SYSTEM
+- MGBE0_MAC_VM1
+0x06830000 0x0683ffff
+- SYSTEM
+- MGBE0_MAC_VM2
+0x06840000 0x0684ffff
+- SYSTEM
+- MGBE0_MAC_VM3
+0x06850000 0x0685ffff
+- SYSTEM
+- MGBE0_MAC_VM4
+0x06860000 0x0686ffff
+- SYSTEM
+- MGBE0_MAC_VM5
+0x06870000 0x0687ffff
+- SYSTEM
+- MGBE0_MAC_VM6
+0x06880000 0x0688ffff
+- SYSTEM
+- MGBE0_MAC_VM7
+0x06890000 0x0689ffff
+- SYSTEM
+- MGBE0_PCS
+0x068a0000 0x068bffff
+- CCPLEX
+- MGBE0_PCS_RM
+0x068a0000 0x068affff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- MGBE0_MACSEC
+0x068c0000 0x068effff
+- CCPLEX
+- MGBE0_MACSEC_TZ
+0x068c0000 0x068cffff
+- SYSTEM
+- MGBE0_MACSEC_RM
+0x068d0000 0x068dffff
+- SYSTEM
+- MGBE0_MACSEC_RM_CFG
+0x068d0000 0x068dcfff
+- SYSTEM
+- MGBE0_MACSEC_RM_TX_BY
+P 0x068dd000 0x068ddfff
+- SYSTEM
+- MGBE0_MACSEC_RM_RX_BY
+P 0x068de000 0x068defff
+- SYSTEM
+- MGBE0_MACSEC_RM_ERR
+0x068df000 0x068dffff
+- SYSTEM
+- MGBE0_MACSEC_VM
+0x068e0000 0x068effff
+- SYSTEM
+- MGBE0_MACSEC_VM_STATS
+0x068e0000 0x068eefff
+- SYSTEM
+- MGBE0_MACSEC_VM_STS_E
+- RR
+0x068ef000 0x068effff
+- SYSTEM
+- MGBE1
+0x06900000 0x069fffff
+- SYSTEM
+- MGBE1_MAC
+0x06900000 0x0699ffff
+- SYSTEM
+- MGBE1_MAC_HV
+0x06900000 0x0690ffff
+- SYSTEM
+- MGBE1_MAC_RM
+0x06910000 0x0691ffff
+- SYSTEM
+- MGBE1_MAC_RM_CFG
+0x06910000 0x0691efff
+- SYSTEM
+- MGBE1_MAC_RM_ERR
+0x0691f000 0x0691ffff
+- SYSTEM
+- MGBE1_MAC_VM0
+0x06920000 0x0692ffff
+- SYSTEM
+- MGBE1_MAC_VM1
+0x06930000 0x0693ffff
+- SYSTEM
+- MGBE1_MAC_VM2
+0x06940000 0x0694ffff
+- SYSTEM
+- MGBE1_MAC_VM3
+0x06950000 0x0695ffff
+- SYSTEM
+- MGBE1_MAC_VM4
+0x06960000 0x0696ffff
+- SYSTEM
+- MGBE1_MAC_VM5
+0x06970000 0x0697ffff
+- SYSTEM
+- MGBE1_MAC_VM6
+0x06980000 0x0698ffff
+- SYSTEM
+- MGBE1_MAC_VM7
+0x06990000 0x0699ffff
+- SYSTEM
+- MGBE1_PCS
+0x069a0000 0x069bffff
+- CCPLEX
+- MGBE1_PCS_RM
+0x069a0000 0x069affff
+- SYSTEM
+- MGBE1_MACSEC
+0x069c0000 0x069effff
+- CCPLEX
+- MGBE1_MACSEC_TZ
+0x069c0000 0x069cffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- MGBE1_MACSEC_RM
+0x069d0000 0x069dffff
+- SYSTEM
+- MGBE1_MACSEC_RM_CFG
+0x069d0000 0x069dcfff
+- SYSTEM
+- MGBE1_MACSEC_RM_TX_BY
+P 0x069dd000 0x069ddfff
+- SYSTEM
+- MGBE1_MACSEC_RM_RX_BY
+P 0x069de000 0x069defff
+- SYSTEM
+- MGBE1_MACSEC_RM_ERR
+0x069df000 0x069dffff
+- SYSTEM
+- MGBE1_MACSEC_VM
+0x069e0000 0x069effff
+- SYSTEM
+- MGBE1_MACSEC_VM_STATS
+0x069e0000 0x069eefff
+- SYSTEM
+- MGBE1_MACSEC_VM_STS_E
+- RR
+0x069ef000 0x069effff
+- SYSTEM
+- MGBE2
+0x06a00000 0x06afffff
+- SYSTEM
+- MGBE2_MAC
+0x06a00000 0x06a9ffff
+- SYSTEM
+- MGBE2_MAC_HV
+0x06a00000 0x06a0ffff
+- SYSTEM
+- MGBE2_MAC_RM
+0x06a10000 0x06a1ffff
+- SYSTEM
+- MGBE2_MAC_RM_CFG
+0x06a10000 0x06a1efff
+- SYSTEM
+- MGBE2_MAC_RM_ERR
+0x06a1f000 0x06a1ffff
+- SYSTEM
+- MGBE2_MAC_VM0
+0x06a20000 0x06a2ffff
+- SYSTEM
+- MGBE2_MAC_VM1
+0x06a30000 0x06a3ffff
+- SYSTEM
+- MGBE2_MAC_VM2
+0x06a40000 0x06a4ffff
+- SYSTEM
+- MGBE2_MAC_VM3
+0x06a50000 0x06a5ffff
+- SYSTEM
+- MGBE2_MAC_VM4
+0x06a60000 0x06a6ffff
+- SYSTEM
+- MGBE2_MAC_VM5
+0x06a70000 0x06a7ffff
+- SYSTEM
+- MGBE2_MAC_VM6
+0x06a80000 0x06a8ffff
+- SYSTEM
+- MGBE2_MAC_VM7
+0x06a90000 0x06a9ffff
+- SYSTEM
+- MGBE2_PCS
+0x06aa0000 0x06abffff
+- CCPLEX
+- MGBE2_PCS_RM
+0x06aa0000 0x06aaffff
+- SYSTEM
+- MGBE2_MACSEC
+0x06ac0000 0x06aeffff
+- CCPLEX
+- MGBE2_MACSEC_TZ
+0x06ac0000 0x06acffff
+- SYSTEM
+- MGBE2_MACSEC_RM
+0x06ad0000 0x06adffff
+- SYSTEM
+- MGBE2_MACSEC_RM_CFG
+0x06ad0000 0x06adcfff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- MGBE2_MACSEC_RM_TX_BY
+P 0x06add000 0x06addfff
+- SYSTEM
+- MGBE2_MACSEC_RM_RX_BY
+P 0x06ade000 0x06adefff
+- SYSTEM
+- MGBE2_MACSEC_RM_ERR
+0x06adf000 0x06adffff
+- SYSTEM
+- MGBE2_MACSEC_VM
+0x06ae0000 0x06aeffff
+- SYSTEM
+- MGBE2_MACSEC_VM_STATS
+0x06ae0000 0x06aeefff
+- SYSTEM
+- MGBE2_MACSEC_VM_STS_E
+- RR
+0x06aef000 0x06aeffff
+- SYSTEM
+- MGBE3
+0x06b00000 0x06bfffff
+- SYSTEM
+- MGBE3_MAC
+0x06b00000 0x06b9ffff
+- SYSTEM
+- MGBE3_MAC_HV
+0x06b00000 0x06b0ffff
+- SYSTEM
+- MGBE3_MAC_RM
+0x06b10000 0x06b1ffff
+- SYSTEM
+- MGBE3_MAC_RM_CFG
+0x06b10000 0x06b1efff
+- SYSTEM
+- MGBE3_MAC_RM_ERR
+0x06b1f000 0x06b1ffff
+- SYSTEM
+- MGBE3_MAC_VM0
+0x06b20000 0x06b2ffff
+- SYSTEM
+- MGBE3_MAC_VM1
+0x06b30000 0x06b3ffff
+- SYSTEM
+- MGBE3_MAC_VM2
+0x06b40000 0x06b4ffff
+- SYSTEM
+- MGBE3_MAC_VM3
+0x06b50000 0x06b5ffff
+- SYSTEM
+- MGBE3_MAC_VM4
+0x06b60000 0x06b6ffff
+- SYSTEM
+- MGBE3_MAC_VM5
+0x06b70000 0x06b7ffff
+- SYSTEM
+- MGBE3_MAC_VM6
+0x06b80000 0x06b8ffff
+- SYSTEM
+- MGBE3_MAC_VM7
+0x06b90000 0x06b9ffff
+- SYSTEM
+- MGBE3_PCS
+0x06ba0000 0x06bbffff
+- CCPLEX
+- MGBE3_PCS_RM
+0x06ba0000 0x06baffff
+- SYSTEM
+- MGBE3_MACSEC
+0x06bc0000 0x06beffff
+- CCPLEX
+- MGBE3_MACSEC_TZ
+0x06bc0000 0x06bcffff
+- SYSTEM
+- MGBE3_MACSEC_RM
+0x06bd0000 0x06bdffff
+- SYSTEM
+- MGBE3_MACSEC_RM_CFG
+0x06bd0000 0x06bdcfff
+- SYSTEM
+- MGBE3_MACSEC_RM_TX_BY
+P 0x06bdd000 0x06bddfff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- MGBE3_MACSEC_RM_RX_BY
+P 0x06bde000 0x06bdefff
+- SYSTEM
+- MGBE3_MACSEC_RM_ERR
+0x06bdf000 0x06bdffff
+- SYSTEM
+- MGBE3_MACSEC_VM
+0x06be0000 0x06beffff
+- SYSTEM
+- MGBE3_MACSEC_VM_STATS
+0x06be0000 0x06beefff
+- SYSTEM
+- MGBE3_MACSEC_VM_STS_E
+- RR
+0x06bef000 0x06beffff
+- SYSTEM
+- SMMU3
+0x07000000 0x07ffffff
+- SYSTEM
+- SMMU4
+0x08000000 0x08ffffff
+- SYSTEM
+- FSI_CLUSTER
+0x09000000 0x09ffffff
+- SYSTEM
+- FSI_TKE
+0x09000000 0x0909ffff
+- SYSTEM
+- FSI_TKE_SHARED
+0x09000000 0x0900ffff
+- SYSTEM
+- FSI_TKE_TMR
+0x09010000 0x0904ffff
+- SYSTEM
+- FSI_TKE_TMR_0
+0x09010000 0x0901ffff
+- SYSTEM
+- FSI_TKE_TMR_1
+0x09020000 0x0902ffff
+- SYSTEM
+- FSI_TKE_TMR_2
+0x09030000 0x0903ffff
+- SYSTEM
+- FSI_TKE_TMR_3
+0x09040000 0x0904ffff
+- SYSTEM
+- FSI_TKE_WDT
+0x09050000 0x0909ffff
+- SYSTEM
+- FSI_TKE_WDT_0
+0x09050000 0x0905ffff
+- SYSTEM
+- FSI_TKE_WDT_1
+0x09060000 0x0906ffff
+- SYSTEM
+- FSI_TKE_WDT_2
+0x09070000 0x0907ffff
+- SYSTEM
+- FSI_TKE_WDT_3
+0x09080000 0x0908ffff
+- SYSTEM
+- FSI_TKE_WDT_4
+0x09090000 0x0909ffff
+- SYSTEM
+- FSI_FABRIC
+0x090a0000 0x090fffff
+- SYSTEM
+- FSI_CHSM_CPU_T_FIREWALL
+0x090a0000 0x090a3fff
+- SYSTEM
+- FSI_CONTROL_FIREWALL
+0x090a4000 0x090a7fff
+- SYSTEM
+- FSI_CPU_AXIS_FIREWALL
+0x090a8000 0x090abfff
+- SYSTEM
+- FSI_DBB_FIREWALL
+0x090ac000 0x090affff
+- SYSTEM
+- FSI_SRAM_FIREWALL_0
+0x090b0000 0x090b3fff
+- SYSTEM
+- FSI_SRAM_FIREWALL_1
+0x090b4000 0x090b7fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- FSI_SRAM_FIREWALL_2
+0x090b8000 0x090bbfff
+- SYSTEM
+- FSI_SN_AXI2APB_1
+0x090c0000 0x090c0fff
+- SYSTEM
+- FSI_FABRIC_ERR_COLLATOR
+0x090c8000 0x090c8fff
+- SYSTEM
+- FSI_FABRIC_SRAM0_ERR_CO
+- LLATOR
+0x090c9000 0x090c9fff
+- SYSTEM
+- FSI_FABRIC_SRAM1_ERR_CO
+- LLATOR
+0x090ca000 0x090cafff
+- SYSTEM
+- FSI_FABRIC_SRAM2_ERR_CO
+- LLATOR
+0x090cb000 0x090cbfff
+- SYSTEM
+- FSI_MN_CBB_I
+0x090d0000 0x090d0fff
+- SYSTEM
+- FSI_MN_CHSM_CPU_M
+0x090d1000 0x090d1fff
+- SYSTEM
+- FSI_MN_CHSM_CPU_P
+0x090d2000 0x090d2fff
+- SYSTEM
+- FSI_MN_CPU0_M
+0x090d3000 0x090d3fff
+- SYSTEM
+- FSI_MN_CPU0_P
+0x090d4000 0x090d4fff
+- SYSTEM
+- FSI_MN_CPU1_M
+0x090d5000 0x090d5fff
+- SYSTEM
+- FSI_MN_CPU1_P
+0x090d6000 0x090d6fff
+- SYSTEM
+- FSI_MN_CPU2_M
+0x090d7000 0x090d7fff
+- SYSTEM
+- FSI_MN_CPU2_P
+0x090d8000 0x090d8fff
+- SYSTEM
+- FSI_MN_CPU3_M
+0x090d9000 0x090d9fff
+- SYSTEM
+- FSI_MN_CPU3_P
+0x090da000 0x090dafff
+- SYSTEM
+- FSI_MN_DMA_M
+0x090db000 0x090dbfff
+- SYSTEM
+- FSI_MN_DMA_P
+0x090dc000 0x090dcfff
+- SYSTEM
+- FSI_MN_SE_M
+0x090dd000 0x090ddfff
+- SYSTEM
+- FSI_SN_CBB_T
+0x090e0000 0x090e0fff
+- SYSTEM
+- FSI_SN_CHSM_CPU_T
+0x090e1000 0x090e1fff
+- SYSTEM
+- FSI_SN_CPU_AXIS
+0x090e2000 0x090e2fff
+- SYSTEM
+- FSI_SN_DBB
+0x090e3000 0x090e3fff
+- SYSTEM
+- FSI_SN_SRAM0
+0x090e4000 0x090e4fff
+- SYSTEM
+- FSI_SN_SRAM1
+0x090e5000 0x090e5fff
+- SYSTEM
+- FSI_SN_SRAM2
+0x090e6000 0x090e6fff
+- SYSTEM
+- FSI_SN_SRAM3
+0x090e7000 0x090e7fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- FSI_SN_SRAM4
+0x090e8000 0x090e8fff
+- SYSTEM
+- FSI_SN_SRAM5
+0x090e9000 0x090e9fff
+- SYSTEM
+- FSI_EN_CFG
+0x090f0000 0x090f0fff
+- SYSTEM
+- FSI_DMA
+0x09100000 0x0918ffff
+- SYSTEM
+- FSI_DMA_COMMON
+0x09100000 0x0910ffff
+- SYSTEM
+- FSI_DMA_CH_0
+0x09110000 0x0911ffff
+- SYSTEM
+- FSI_DMA_CH_1
+0x09120000 0x0912ffff
+- SYSTEM
+- FSI_DMA_CH_2
+0x09130000 0x0913ffff
+- SYSTEM
+- FSI_DMA_CH_3
+0x09140000 0x0914ffff
+- SYSTEM
+- FSI_DMA_CH_4
+0x09150000 0x0915ffff
+- SYSTEM
+- FSI_DMA_CH_5
+0x09160000 0x0916ffff
+- SYSTEM
+- FSI_DMA_CH_6
+0x09170000 0x0917ffff
+- SYSTEM
+- FSI_DMA_CH_7
+0x09180000 0x0918ffff
+- SYSTEM
+- FSI_MISC
+0x09190000 0x0919ffff
+- SYSTEM
+- FSI_MISC_CHSM_CPU
+0x09190000 0x09190fff
+- SYSTEM
+- FSI_MISC_CPU_0
+0x09191000 0x09191fff
+- SYSTEM
+- FSI_MISC_CPU_1
+0x09192000 0x09192fff
+- SYSTEM
+- FSI_MISC_CPU_2
+0x09193000 0x09193fff
+- SYSTEM
+- FSI_MISC_CPU_3
+0x09194000 0x09194fff
+- SYSTEM
+- FSI_MISC_SEC_CFG
+0x09195000 0x09195fff
+- SYSTEM
+- FSI_MISC_BOOT_CFG
+0x09196000 0x09196fff
+- SYSTEM
+- FSI_MISC_GEN_CFG
+0x09197000 0x09197fff
+- SYSTEM
+- FSI_MISC_DRAM_CARVEOUT
+0x09198000 0x09198fff
+- SYSTEM
+- FSI_MISC_LOW_PWR
+0x09199000 0x09199fff
+- SYSTEM
+- FSI_MISC_ISOLATION
+0x0919a000 0x0919afff
+- SYSTEM
+- FSI_MISC_SRAM_CTL
+0x0919b000 0x0919bfff
+- SYSTEM
+- FSI_KEYBLOB
+0x091a0000 0x091affff
+- SYSTEM
+- FSI_SE
+0x091c0000 0x091effff
+- SYSTEM
+- FSI_SE_SAP_SFTY
+0x091c0000 0x091cffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- FSI_SE_SAP
+0x091c0000 0x091cefff
+- SYSTEM
+- FSI_SE_SFTY
+0x091cf000 0x091cffff
+- SYSTEM
+- FSI_SE_PKA
+0x091d0000 0x091dffff
+- SYSTEM
+- FSI_SE_RNG
+0x091e0000 0x091effff
+- SYSTEM
+- FSI_UART0
+0x09200000 0x0920ffff
+- SYSTEM
+- FSI_SPI0
+0x09210000 0x0921ffff
+- SYSTEM
+- FSI_CAN0
+0x09220000 0x0922ffff
+- SYSTEM
+- FSI_CAN1
+0x09230000 0x0923ffff
+- SYSTEM
+- FSI_PADCTL
+0x09240000 0x0924ffff
+- SYSTEM
+- FSI_PADCTL_A0
+0x09240000 0x09240fff
+- SYSTEM
+- FSI_PADCTL_A1
+0x09241000 0x09241fff
+- SYSTEM
+- FSI_PADCTL_A2
+0x09242000 0x09242fff
+- SYSTEM
+- FSI_GPIO
+0x09250000 0x0925ffff
+- SYSTEM
+- FSI_GPIO_CTL0
+0x09250000 0x09251fff
+- SYSTEM
+- FSI_GPIO_CTL1
+0x09252000 0x09253fff
+- SYSTEM
+- FSI_CPU0_AST
+0x09280000 0x0928ffff
+- SYSTEM
+- FSI_CPU1_AST
+0x09290000 0x0929ffff
+- SYSTEM
+- FSI_CPU2_AST
+0x092a0000 0x092affff
+- SYSTEM
+- FSI_CPU3_AST
+0x092b0000 0x092bffff
+- SYSTEM
+- FSI_PM
+0x092c0000 0x092cffff
+- SYSTEM
+- FSI_CHSM_AST
+0x092d0000 0x092dffff
+- SYSTEM
+- FSI_CHSM_AVIC
+0x092e0000 0x092effff
+- SYSTEM
+- FSI_CHSM_AVIC0
+0x092e0000 0x092e7fff
+- SYSTEM
+- FSI_CHSM_AVIC1
+0x092e8000 0x092effff
+- SYSTEM
+- FSI_CHSM_CFG_EVP
+0x092f0000 0x092f0fff
+- SYSTEM
+- FSI_CHSM_PROC_CFG
+0x092f1000 0x092f1fff
+- SYSTEM
+- FSI_HSP
+0x09300000 0x0938ffff
+- SYSTEM
+- FSI_HSP_COMMON
+0x09300000 0x0930ffff
+- SYSTEM
+- FSI_HSP_SM
+0x09310000 0x0934ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- FSI_HSP_SM_0_1
+0x09310000 0x0931ffff
+- SYSTEM
+- FSI_HSP_SM_2_3
+0x09320000 0x0932ffff
+- SYSTEM
+- FSI_HSP_SM_4_5
+0x09330000 0x0933ffff
+- SYSTEM
+- FSI_HSP_SM_6_7
+0x09340000 0x0934ffff
+- SYSTEM
+- FSI_HSP_SS
+0x09350000 0x0938ffff
+- SYSTEM
+- FSI_HSP_SS_0
+0x09350000 0x0935ffff
+- SYSTEM
+- FSI_HSP_SS_1
+0x09360000 0x0936ffff
+- SYSTEM
+- FSI_HSP_SS_2
+0x09370000 0x0937ffff
+- SYSTEM
+- FSI_HSP_SS_3
+0x09380000 0x0938ffff
+- SYSTEM
+- FSI_HSM
+0x09390000 0x0939ffff
+- SYSTEM
+- FSI_ERR_COLLATOR
+0x093a0000 0x093affff
+- SYSTEM
+- FSI_ERR_COLLATOR_CPU
+0x093a0000 0x093a0fff
+- SYSTEM
+- FSI_ERR_COLLATOR_CHSM
+0x093a1000 0x093a1fff
+- SYSTEM
+- FSI_ERR_COLLATOR_MISC
+0x093a2000 0x093a2fff
+- SYSTEM
+- FSI_ERR_COLLATOR_SRAM0
+0x093a3000 0x093a3fff
+- SYSTEM
+- FSI_ERR_COLLATOR_SRAM1
+0x093a4000 0x093a4fff
+- SYSTEM
+- FSI_ERR_COLLATOR_SRAM2
+0x093a5000 0x093a5fff
+- SYSTEM
+- FSI_SCPM
+0x093b0000 0x093bffff
+- SYSTEM
+- FSI_SCPM0
+0x093b0000 0x093b0fff
+- SYSTEM
+- FSI_SCPM1
+0x093b1000 0x093b1fff
+- SYSTEM
+- FSI_POD
+0x093c0000 0x093cffff
+- SYSTEM
+- FSI_THERM
+0x093d0000 0x093dffff
+- SYSTEM
+- FSI_TSC
+0x093f0000 0x093fffff
+- SYSTEM
+- FSI_TSC_SYSCTR0
+0x093f0000 0x093f0fff
+- SYSTEM
+- FSI_TSC_SYSCTR1
+0x093f1000 0x093f1fff
+- SYSTEM
+- FSI_TSC_SYSCTR2
+0x093f2000 0x093f2fff
+- SYSTEM
+- FSI_TSC_IMPL
+0x093f3000 0x093f3fff
+- SYSTEM
+- FSI_TSCUS
+0x093f4000 0x093f4fff
+- SYSTEM
+- FSI_GIC
+0x09400000 0x0959ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- FSI_GICD
+0x09400000 0x0940ffff
+- SYSTEM
+- FSI_GICR0_CTL
+0x09500000 0x0950ffff
+- SYSTEM
+- FSI_GICR0_INT
+0x09510000 0x0951ffff
+- SYSTEM
+- FSI_GICR1_CTL
+0x09520000 0x0952ffff
+- SYSTEM
+- FSI_GICR1_INT
+0x09530000 0x0953ffff
+- SYSTEM
+- FSI_GICR2_CTL
+0x09540000 0x0954ffff
+- SYSTEM
+- FSI_GICR2_INT
+0x09550000 0x0955ffff
+- SYSTEM
+- FSI_GICR3_CTL
+0x09560000 0x0956ffff
+- SYSTEM
+- FSI_GICR3_INT
+0x09570000 0x0957ffff
+- SYSTEM
+- FSI_GICR4_CTL
+0x09580000 0x0958ffff
+- SYSTEM
+- FSI_GICR4_INT
+0x09590000 0x0959ffff
+- SYSTEM
+- SCE_CLUSTER
+0x0b000000 0x0b7fffff
+- SYSTEM
+- SCE_ATCM_CFG
+0x0b000000 0x0b01ffff
+- SYSTEM
+- SCE_ATCM_CFG_EVP
+0x0b000000 0x0b00ffff
+- SYSTEM
+- SCE_VIC_0
+0x0b020000 0x0b02ffff
+- SYSTEM
+- SCE_VIC_1
+0x0b030000 0x0b03ffff
+- SYSTEM
+- SCE_AST_0
+0x0b040000 0x0b04ffff
+- SYSTEM
+- SCE_AST_1
+0x0b050000 0x0b05ffff
+- SYSTEM
+- SCE_DMA
+0x0b060000 0x0b0effff
+- SYSTEM
+- SCE_DMA_COMMON
+0x0b060000 0x0b06ffff
+- SYSTEM
+- SCE_DMA_CH_0
+0x0b070000 0x0b07ffff
+- SYSTEM
+- SCE_DMA_CH_1
+0x0b080000 0x0b08ffff
+- SYSTEM
+- SCE_DMA_CH_2
+0x0b090000 0x0b09ffff
+- SYSTEM
+- SCE_DMA_CH_3
+0x0b0a0000 0x0b0affff
+- SYSTEM
+- SCE_DMA_CH_4
+0x0b0b0000 0x0b0bffff
+- SYSTEM
+- SCE_DMA_CH_5
+0x0b0c0000 0x0b0cffff
+- SYSTEM
+- SCE_DMA_CH_6
+0x0b0d0000 0x0b0dffff
+- SYSTEM
+- SCE_DMA_CH_7
+0x0b0e0000 0x0b0effff
+- SYSTEM
+- SCE_TKE
+0x0b0f0000 0x0b14ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- SCE_TKE_SHARED
+0x0b0f0000 0x0b0fffff
+- SYSTEM
+- SCE_TKE_TMR
+0x0b100000 0x0b13ffff
+- SYSTEM
+- SCE_TKE_TMR_0
+0x0b100000 0x0b10ffff
+- SYSTEM
+- SCE_TKE_TMR_1
+0x0b110000 0x0b11ffff
+- SYSTEM
+- SCE_TKE_TMR_2
+0x0b120000 0x0b12ffff
+- SYSTEM
+- SCE_TKE_TMR_3
+0x0b130000 0x0b13ffff
+- SYSTEM
+- SCE_TKE_WDT
+0x0b140000 0x0b14ffff
+- SYSTEM
+- SCE_TKE_WDT_0
+0x0b140000 0x0b14ffff
+- SYSTEM
+- SCE_HSP
+0x0b150000 0x0b1dffff
+- SYSTEM
+- SCE_HSP_COMMON
+0x0b150000 0x0b15ffff
+- SYSTEM
+- SCE_HSP_SM
+0x0b160000 0x0b19ffff
+- SYSTEM
+- SCE_HSP_SM_0_1
+0x0b160000 0x0b16ffff
+- SYSTEM
+- SCE_HSP_SM_2_3
+0x0b170000 0x0b17ffff
+- SYSTEM
+- SCE_HSP_SM_4_5
+0x0b180000 0x0b18ffff
+- SYSTEM
+- SCE_HSP_SM_6_7
+0x0b190000 0x0b19ffff
+- SYSTEM
+- SCE_HSP_SS
+0x0b1a0000 0x0b1dffff
+- SYSTEM
+- SCE_HSP_SS_0
+0x0b1a0000 0x0b1affff
+- SYSTEM
+- SCE_HSP_SS_1
+0x0b1b0000 0x0b1bffff
+- SYSTEM
+- SCE_HSP_SS_2
+0x0b1c0000 0x0b1cffff
+- SYSTEM
+- SCE_HSP_SS_3
+0x0b1d0000 0x0b1dffff
+- SYSTEM
+- SCE_GTE
+0x0b1e0000 0x0b1effff
+- SYSTEM
+- SCE_PM
+0x0b1f0000 0x0b22ffff
+- SYSTEM
+- SCE_PM_IMPL
+0x0b1f0000 0x0b1fffff
+- SYSTEM
+- SCE_ACTMON
+0x0b200000 0x0b20ffff
+- SYSTEM
+- SCE_CFG
+0x0b230000 0x0b23ffff
+- SYSTEM
+- HSM
+0x0b240000 0x0b24ffff
+- SYSTEM
+- SCE_R5AXISLAVE
+0x0b400000 0x0b5fffff
+- SYSTEM
+- SCE_ATCM_EXT
+0x0b400000 0x0b47ffff
+- SYSTEM
+- SCE_ATCM_EVP_EXT
+0x0b400000 0x0b40ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- SCE_BTCM
+0x0b480000 0x0b4dffff
+- SYSTEM
+- SCE_ICACHE_ACCESS_PORT
+0x0b500000 0x0b57ffff
+- SYSTEM
+- SCE_DCACHE_ACCESS_PORT
+0x0b580000 0x0b5fffff
+- SYSTEM
+- SCE_FABRIC
+0x0b600000 0x0b63ffff
+- SYSTEM
+- SCE_SN_AXI2APB_1
+0x0b600000 0x0b600fff
+- SYSTEM
+- SCE_MN_CPU_M_I
+0x0b610000 0x0b610fff
+- SYSTEM
+- SCE_MN_CBB_I
+0x0b611000 0x0b611fff
+- SYSTEM
+- SCE_MN_CPU_P_I
+0x0b612000 0x0b612fff
+- SYSTEM
+- SCE_MN_DMA_M_I
+0x0b613000 0x0b613fff
+- SYSTEM
+- SCE_MN_DMA_P_I
+0x0b614000 0x0b614fff
+- SYSTEM
+- SCE_SN_AST0_T
+0x0b615000 0x0b615fff
+- SYSTEM
+- SCE_SN_AST1_T
+0x0b616000 0x0b616fff
+- SYSTEM
+- SCE_SN_CBB_T
+0x0b617000 0x0b617fff
+- SYSTEM
+- SCE_SN_CPU_T
+0x0b618000 0x0b618fff
+- SYSTEM
+- SCE_EN_CFG
+0x0b619000 0x0b619fff
+- SYSTEM
+- SCE_FABRIC_ERR_COLLATOR
+0x0b620000 0x0b620fff
+- SYSTEM
+- SCE_FIREWALL
+0x0b630000 0x0b63ffff
+- SYSTEM
+- SCE_ERR_COLLATOR
+0x0b650000 0x0b65ffff
+- SYSTEM
+- SCE_MISC
+0x0b660000 0x0b66ffff
+- SYSTEM
+- SCE_HSP1
+0x0b670000 0x0b6fffff
+- SYSTEM
+- SCE_HSP1_COMMON
+0x0b670000 0x0b67ffff
+- SYSTEM
+- SCE_HSP1_SM
+0x0b680000 0x0b6bffff
+- SYSTEM
+- SCE_HSP1_SM_0_1
+0x0b680000 0x0b68ffff
+- SYSTEM
+- SCE_HSP1_SM_2_3
+0x0b690000 0x0b69ffff
+- SYSTEM
+- SCE_HSP1_SM_4_5
+0x0b6a0000 0x0b6affff
+- SYSTEM
+- SCE_HSP1_SM_6_7
+0x0b6b0000 0x0b6bffff
+- SYSTEM
+- SCE_HSP1_SS
+0x0b6c0000 0x0b6fffff
+- SYSTEM
+- SCE_HSP1_SS_0
+0x0b6c0000 0x0b6cffff
+- SYSTEM
+- SCE_HSP1_SS_1
+0x0b6d0000 0x0b6dffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- SCE_HSP1_SS_2
+0x0b6e0000 0x0b6effff
+- SYSTEM
+- SCE_HSP1_SS_3
+0x0b6f0000 0x0b6fffff
+- SYSTEM
+- SCE_HSP2
+0x0b700000 0x0b78ffff
+- SYSTEM
+- SCE_HSP2_COMMON
+0x0b700000 0x0b70ffff
+- SYSTEM
+- SCE_HSP2_SM
+0x0b710000 0x0b74ffff
+- SYSTEM
+- SCE_HSP2_SM_0_1
+0x0b710000 0x0b71ffff
+- SYSTEM
+- SCE_HSP2_SM_2_3
+0x0b720000 0x0b72ffff
+- SYSTEM
+- SCE_HSP2_SM_4_5
+0x0b730000 0x0b73ffff
+- SYSTEM
+- SCE_HSP2_SM_6_7
+0x0b740000 0x0b74ffff
+- SYSTEM
+- SCE_HSP2_SS
+0x0b750000 0x0b78ffff
+- SYSTEM
+- SCE_HSP2_SS_0
+0x0b750000 0x0b75ffff
+- SYSTEM
+- SCE_HSP2_SS_1
+0x0b760000 0x0b76ffff
+- SYSTEM
+- SCE_HSP2_SS_2
+0x0b770000 0x0b77ffff
+- SYSTEM
+- SCE_HSP2_SS_3
+0x0b780000 0x0b78ffff
+- SYSTEM
+- RCE_CLUSTER
+0x0b800000 0x0bffffff
+- SYSTEM
+- RCE_ATCM_CFG
+0x0b800000 0x0b81ffff
+- SYSTEM
+- RCE_ATCM_CFG_EVP
+0x0b800000 0x0b80ffff
+- SYSTEM
+- RCE_VIC_0
+0x0b820000 0x0b82ffff
+- SYSTEM
+- RCE_VIC_1
+0x0b830000 0x0b83ffff
+- SYSTEM
+- RCE_AST_0
+0x0b840000 0x0b84ffff
+- SYSTEM
+- RCE_AST_1
+0x0b850000 0x0b85ffff
+- SYSTEM
+- RCE_DMA
+0x0b860000 0x0b8effff
+- SYSTEM
+- RCE_DMA_COMMON
+0x0b860000 0x0b86ffff
+- SYSTEM
+- RCE_DMA_CH_0
+0x0b870000 0x0b87ffff
+- SYSTEM
+- RCE_DMA_CH_1
+0x0b880000 0x0b88ffff
+- SYSTEM
+- RCE_DMA_CH_2
+0x0b890000 0x0b89ffff
+- SYSTEM
+- RCE_DMA_CH_3
+0x0b8a0000 0x0b8affff
+- SYSTEM
+- RCE_DMA_CH_4
+0x0b8b0000 0x0b8bffff
+- SYSTEM
+- RCE_DMA_CH_5
+0x0b8c0000 0x0b8cffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- RCE_DMA_CH_6
+0x0b8d0000 0x0b8dffff
+- SYSTEM
+- RCE_DMA_CH_7
+0x0b8e0000 0x0b8effff
+- SYSTEM
+- RCE_TKE
+0x0b8f0000 0x0b94ffff
+- SYSTEM
+- RCE_TKE_SHARED
+0x0b8f0000 0x0b8fffff
+- SYSTEM
+- RCE_TKE_TMR
+0x0b900000 0x0b93ffff
+- SYSTEM
+- RCE_TKE_TMR_0
+0x0b900000 0x0b90ffff
+- SYSTEM
+- RCE_TKE_TMR_1
+0x0b910000 0x0b91ffff
+- SYSTEM
+- RCE_TKE_TMR_2
+0x0b920000 0x0b92ffff
+- SYSTEM
+- RCE_TKE_TMR_3
+0x0b930000 0x0b93ffff
+- SYSTEM
+- RCE_TKE_WDT
+0x0b940000 0x0b94ffff
+- SYSTEM
+- RCE_TKE_WDT_0
+0x0b940000 0x0b94ffff
+- SYSTEM
+- RCE_HSP
+0x0b950000 0x0b9dffff
+- SYSTEM
+- RCE_HSP_COMMON
+0x0b950000 0x0b95ffff
+- SYSTEM
+- RCE_HSP_SM
+0x0b960000 0x0b99ffff
+- SYSTEM
+- RCE_HSP_SM_0_1
+0x0b960000 0x0b96ffff
+- SYSTEM
+- RCE_HSP_SM_2_3
+0x0b970000 0x0b97ffff
+- SYSTEM
+- RCE_HSP_SM_4_5
+0x0b980000 0x0b98ffff
+- SYSTEM
+- RCE_HSP_SM_6_7
+0x0b990000 0x0b99ffff
+- SYSTEM
+- RCE_HSP_SS
+0x0b9a0000 0x0b9dffff
+- SYSTEM
+- RCE_HSP_SS_0
+0x0b9a0000 0x0b9affff
+- SYSTEM
+- RCE_HSP_SS_1
+0x0b9b0000 0x0b9bffff
+- SYSTEM
+- RCE_HSP_SS_2
+0x0b9c0000 0x0b9cffff
+- SYSTEM
+- RCE_HSP_SS_3
+0x0b9d0000 0x0b9dffff
+- SYSTEM
+- RCE_GTE
+0x0b9e0000 0x0b9effff
+- SYSTEM
+- RCE_PM
+0x0b9f0000 0x0ba2ffff
+- SYSTEM
+- RCE_PM_IMPL
+0x0b9f0000 0x0b9fffff
+- SYSTEM
+- RCE_ACTMON
+0x0ba00000 0x0ba0ffff
+- SYSTEM
+- RCE_CFG
+0x0ba30000 0x0ba3ffff
+- SYSTEM
+- RCE_HSM
+0x0ba40000 0x0ba4ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- RCE_R5AXISLAVE
+0x0bc00000 0x0bdfffff
+- SYSTEM
+- RCE_ATCM_EXT
+0x0bc00000 0x0bc7ffff
+- SYSTEM
+- RCE_ATCM_EVP_EXT
+0x0bc00000 0x0bc0ffff
+- SYSTEM
+- RCE_BTCM
+0x0bc80000 0x0bcdffff
+- SYSTEM
+- RCE_ICACHE_ACCESS_PORT
+0x0bd00000 0x0bd7ffff
+- SYSTEM
+- RCE_DCACHE_ACCESS_PORT
+0x0bd80000 0x0bdfffff
+- SYSTEM
+- RCE_FABRIC
+0x0be00000 0x0be3ffff
+- SYSTEM
+- RCE_SN_AXI2APB_1
+0x0be00000 0x0be00fff
+- SYSTEM
+- RCE_MN_CPU_M_I
+0x0be10000 0x0be10fff
+- SYSTEM
+- RCE_MN_CBB_I
+0x0be11000 0x0be11fff
+- SYSTEM
+- RCE_MN_CPU_P_I
+0x0be12000 0x0be12fff
+- SYSTEM
+- RCE_MN_DMA_M_I
+0x0be13000 0x0be13fff
+- SYSTEM
+- RCE_MN_DMA_P_I
+0x0be14000 0x0be14fff
+- SYSTEM
+- RCE_SN_AST0_T
+0x0be15000 0x0be15fff
+- SYSTEM
+- RCE_SN_AST1_T
+0x0be16000 0x0be16fff
+- SYSTEM
+- RCE_SN_CBB_T
+0x0be17000 0x0be17fff
+- SYSTEM
+- RCE_SN_CPU_T
+0x0be18000 0x0be18fff
+- SYSTEM
+- RCE_EN_CFG
+0x0be19000 0x0be19fff
+- SYSTEM
+- RCE_FABRIC_ERR_COLLATOR
+0x0be20000 0x0be20fff
+- SYSTEM
+- RCE_FIREWALL
+0x0be30000 0x0be3ffff
+- SYSTEM
+- RCE_ERR_COLLATOR
+0x0be50000 0x0be5ffff
+- SYSTEM
+- RCE_MISC
+0x0be60000 0x0be6ffff
+- SYSTEM
+- RCE_HSP1
+0x0be70000 0x0befffff
+- SYSTEM
+- RCE_HSP1_COMMON
+0x0be70000 0x0be7ffff
+- SYSTEM
+- RCE_HSP1_SM
+0x0be80000 0x0bebffff
+- SYSTEM
+- RCE_HSP1_SM_0_1
+0x0be80000 0x0be8ffff
+- SYSTEM
+- RCE_HSP1_SM_2_3
+0x0be90000 0x0be9ffff
+- SYSTEM
+- RCE_HSP1_SM_4_5
+0x0bea0000 0x0beaffff
+- SYSTEM
+- RCE_HSP1_SM_6_7
+0x0beb0000 0x0bebffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- RCE_HSP1_SS
+0x0bec0000 0x0befffff
+- SYSTEM
+- RCE_HSP1_SS_0
+0x0bec0000 0x0becffff
+- SYSTEM
+- RCE_HSP1_SS_1
+0x0bed0000 0x0bedffff
+- SYSTEM
+- RCE_HSP1_SS_2
+0x0bee0000 0x0beeffff
+- SYSTEM
+- RCE_HSP1_SS_3
+0x0bef0000 0x0befffff
+- SYSTEM
+- RCE_HSP2
+0x0bf00000 0x0bf8ffff
+- SYSTEM
+- RCE_HSP2_COMMON
+0x0bf00000 0x0bf0ffff
+- SYSTEM
+- RCE_HSP2_SM
+0x0bf10000 0x0bf4ffff
+- SYSTEM
+- RCE_HSP2_SM_0_1
+0x0bf10000 0x0bf1ffff
+- SYSTEM
+- RCE_HSP2_SM_2_3
+0x0bf20000 0x0bf2ffff
+- SYSTEM
+- RCE_HSP2_SM_4_5
+0x0bf30000 0x0bf3ffff
+- SYSTEM
+- RCE_HSP2_SM_6_7
+0x0bf40000 0x0bf4ffff
+- SYSTEM
+- RCE_HSP2_SS
+0x0bf50000 0x0bf8ffff
+- SYSTEM
+- RCE_HSP2_SS_0
+0x0bf50000 0x0bf5ffff
+- SYSTEM
+- RCE_HSP2_SS_1
+0x0bf60000 0x0bf6ffff
+- SYSTEM
+- RCE_HSP2_SS_2
+0x0bf70000 0x0bf7ffff
+- SYSTEM
+- RCE_HSP2_SS_3
+0x0bf80000 0x0bf8ffff
+- SYSTEM
+- AON_CLUSTER
+0x0c000000 0x0c7fffff
+- SYSTEM
+- AON_ATCM_CFG
+0x0c000000 0x0c01ffff
+- SYSTEM
+- AON_ATCM_CFG_EVP
+0x0c000000 0x0c00ffff
+- SYSTEM
+- AON_VIC_0
+0x0c020000 0x0c02ffff
+- SYSTEM
+- AON_VIC_1
+0x0c030000 0x0c03ffff
+- SYSTEM
+- AON_AST_0
+0x0c040000 0x0c04ffff
+- SYSTEM
+- AON_AST_1
+0x0c050000 0x0c05ffff
+- SYSTEM
+- AON_DMA
+0x0c060000 0x0c0effff
+- SYSTEM
+- AON_DMA_COMMON
+0x0c060000 0x0c06ffff
+- SYSTEM
+- AON_DMA_CH_0
+0x0c070000 0x0c07ffff
+- SYSTEM
+- AON_DMA_CH_1
+0x0c080000 0x0c08ffff
+- SYSTEM
+- AON_DMA_CH_2
+0x0c090000 0x0c09ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- AON_DMA_CH_3
+0x0c0a0000 0x0c0affff
+- SYSTEM
+- AON_DMA_CH_4
+0x0c0b0000 0x0c0bffff
+- SYSTEM
+- AON_DMA_CH_5
+0x0c0c0000 0x0c0cffff
+- SYSTEM
+- AON_DMA_CH_6
+0x0c0d0000 0x0c0dffff
+- SYSTEM
+- AON_DMA_CH_7
+0x0c0e0000 0x0c0effff
+- SYSTEM
+- AON_TKE
+0x0c0f0000 0x0c14ffff
+- SYSTEM
+- AON_TKE_SHARED
+0x0c0f0000 0x0c0fffff
+- SYSTEM
+- AON_TKE_TMR
+0x0c100000 0x0c13ffff
+- SYSTEM
+- AON_TKE_TMR_0
+0x0c100000 0x0c10ffff
+- SYSTEM
+- AON_TKE_TMR_1
+0x0c110000 0x0c11ffff
+- SYSTEM
+- AON_TKE_TMR_2
+0x0c120000 0x0c12ffff
+- SYSTEM
+- AON_TKE_TMR_3
+0x0c130000 0x0c13ffff
+- SYSTEM
+- AON_TKE_WDT
+0x0c140000 0x0c14ffff
+- SYSTEM
+- AON_TKE_WDT_0
+0x0c140000 0x0c14ffff
+- SYSTEM
+- AON_HSP
+0x0c150000 0x0c1dffff
+- SYSTEM
+- AON_HSP_COMMON
+0x0c150000 0x0c15ffff
+- SYSTEM
+- AON_HSP_SM
+0x0c160000 0x0c19ffff
+- SYSTEM
+- AON_HSP_SM_0_1
+0x0c160000 0x0c16ffff
+- SYSTEM
+- AON_HSP_SM_2_3
+0x0c170000 0x0c17ffff
+- SYSTEM
+- AON_HSP_SM_4_5
+0x0c180000 0x0c18ffff
+- SYSTEM
+- AON_HSP_SM_6_7
+0x0c190000 0x0c19ffff
+- SYSTEM
+- AON_HSP_SS
+0x0c1a0000 0x0c1dffff
+- SYSTEM
+- AON_HSP_SS_0
+0x0c1a0000 0x0c1affff
+- SYSTEM
+- AON_HSP_SS_1
+0x0c1b0000 0x0c1bffff
+- SYSTEM
+- AON_HSP_SS_2
+0x0c1c0000 0x0c1cffff
+- SYSTEM
+- AON_HSP_SS_3
+0x0c1d0000 0x0c1dffff
+- SYSTEM
+- AON_GTE
+0x0c1e0000 0x0c1effff
+- SYSTEM
+- AON_PM
+0x0c1f0000 0x0c22ffff
+- SYSTEM
+- AON_PM_IMPL
+0x0c1f0000 0x0c1fffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- AON_ACTMON
+0x0c200000 0x0c20ffff
+- SYSTEM
+- AON_CAN_RAM_CTL
+0x0c210000 0x0c21ffff
+- SYSTEM
+- I2C2
+0x0c240000 0x0c24ffff
+- SYSTEM
+- I2C8
+0x0c250000 0x0c25ffff
+- SYSTEM
+- SPI2
+0x0c260000 0x0c26ffff
+- SYSTEM
+- UARTJ
+0x0c270000 0x0c27ffff
+- SYSTEM
+- UARTC
+0x0c280000 0x0c28ffff
+- SYSTEM
+- RTC
+0x0c2a0000 0x0c2affff
+- SYSTEM
+- AON_GPIO_0
+0x0c2f0000 0x0c2fffff
+- SYSTEM
+- AON_PADCTL_0
+0x0c300000 0x0c30ffff
+- SYSTEM
+- PADCTL_A12
+0x0c301000 0x0c301fff
+- SYSTEM
+- PADCTL_A14
+0x0c302000 0x0c302fff
+- SYSTEM
+- PADCTL_A15
+0x0c303000 0x0c303fff
+- SYSTEM
+- CAN1
+0x0c310000 0x0c31ffff
+- SYSTEM
+- CAN2
+0x0c320000 0x0c32ffff
+- SYSTEM
+- DMIC5
+0x0c330000 0x0c33ffff
+- SYSTEM
+- PWM4
+0x0c340000 0x0c34ffff
+- SYSTEM
+- AON_MSS
+0x0c350000 0x0c35ffff
+- SYSTEM
+- PMC
+0x0c360000 0x0c3affff
+- SYSTEM
+- PMC_IMPL
+0x0c360000 0x0c36ffff
+- SYSTEM
+- WAKE
+0x0c370000 0x0c37ffff
+- SYSTEM
+- SCRATCH
+0x0c390000 0x0c39ffff
+- SYSTEM
+- PMC_MISC
+0x0c3a0000 0x0c3affff
+- SYSTEM
+- AON_CEC
+0x0c3e0000 0x0c3effff
+- SYSTEM
+- AON_R5AXISLAVE
+0x0c400000 0x0c5fffff
+- SYSTEM
+- AON_ATCM_EXT
+0x0c400000 0x0c47ffff
+- SYSTEM
+- AON_ATCM_EVP_EXT
+0x0c400000 0x0c40ffff
+- SYSTEM
+- AON_BTCM
+0x0c480000 0x0c4bffff
+- SYSTEM
+- AON_ICACHE_ACCESS_PORT
+0x0c500000 0x0c57ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- AON_DCACHE_ACCESS_POR
+T 0x0c580000 0x0c5fffff
+- SYSTEM
+- AON_FABRIC
+0x0c600000 0x0c63ffff
+- SYSTEM
+- AON_SN_AXI2APB_1
+0x0c600000 0x0c600fff
+- SYSTEM
+- AON_MN_CPU_P_I
+0x0c610000 0x0c610fff
+- SYSTEM
+- AON_MN_DMA_P_I
+0x0c611000 0x0c611fff
+- SYSTEM
+- AON_MN_CBB_I
+0x0c612000 0x0c612fff
+- SYSTEM
+- AON_MN_DMA_M_I
+0x0c613000 0x0c613fff
+- SYSTEM
+- AON_SN_AST1_T
+0x0c614000 0x0c614fff
+- SYSTEM
+- AON_SN_CBB_T
+0x0c615000 0x0c615fff
+- SYSTEM
+- AON_SN_CPU_T
+0x0c616000 0x0c616fff
+- SYSTEM
+- AON_EN_CFG
+0x0c617000 0x0c617fff
+- SYSTEM
+- AON_FABRIC_NPG_ERR_COL
+- LATOR
+0x0c620000 0x0c620fff
+- SYSTEM
+- AON_FABRIC_PG_ERR_COLL
+- ATOR
+0x0c621000 0x0c621fff
+- SYSTEM
+- AON_FIREWALL
+0x0c630000 0x0c63ffff
+- SYSTEM
+- AON_ERR_COLLATOR
+0x0c650000 0x0c65ffff
+- SYSTEM
+- AON_MISC
+0x0c660000 0x0c66ffff
+- SYSTEM
+- TSC
+0x0c670000 0x0c6bffff
+- SYSTEM
+- SYSCTR0
+0x0c670000 0x0c67ffff
+- SYSTEM
+- SYSCTR1
+0x0c680000 0x0c68ffff
+- SYSTEM
+- SYSCTR2
+0x0c690000 0x0c69ffff
+- SYSTEM
+- TSC_IMPL
+0x0c6a0000 0x0c6affff
+- SYSTEM
+- TSCUS
+0x0c6b0000 0x0c6bffff
+- SYSTEM
+- BPMP_CLUSTER
+0x0d000000 0x0d7fffff
+- SYSTEM
+- BPMP_ATCM_CFG
+0x0d000000 0x0d01ffff
+- SYSTEM
+- BPMP_ATCM_CFG_EVP
+0x0d000000 0x0d00ffff
+- SYSTEM
+- BPMP_IPATCH
+0x0d010000 0x0d01ffff
+- SYSTEM
+- BPMP_VIC_0
+0x0d020000 0x0d02ffff
+- SYSTEM
+- BPMP_VIC_1
+0x0d030000 0x0d03ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- BPMP_AST_0
+0x0d040000 0x0d04ffff
+- SYSTEM
+- BPMP_AST_1
+0x0d050000 0x0d05ffff
+- SYSTEM
+- BPMP_DMA
+0x0d060000 0x0d0effff
+- SYSTEM
+- BPMP_DMA_COMMON
+0x0d060000 0x0d06ffff
+- SYSTEM
+- BPMP_DMA_CH_0
+0x0d070000 0x0d07ffff
+- SYSTEM
+- BPMP_DMA_CH_1
+0x0d080000 0x0d08ffff
+- SYSTEM
+- BPMP_DMA_CH_2
+0x0d090000 0x0d09ffff
+- SYSTEM
+- BPMP_DMA_CH_3
+0x0d0a0000 0x0d0affff
+- SYSTEM
+- BPMP_TKE
+0x0d0f0000 0x0d14ffff
+- SYSTEM
+- BPMP_TKE_SHARED
+0x0d0f0000 0x0d0fffff
+- SYSTEM
+- BPMP_TKE_TMR
+0x0d100000 0x0d13ffff
+- SYSTEM
+- BPMP_TKE_TMR_0
+0x0d100000 0x0d10ffff
+- SYSTEM
+- BPMP_TKE_TMR_1
+0x0d110000 0x0d11ffff
+- SYSTEM
+- BPMP_TKE_TMR_2
+0x0d120000 0x0d12ffff
+- SYSTEM
+- BPMP_TKE_TMR_3
+0x0d130000 0x0d13ffff
+- SYSTEM
+- BPMP_TKE_WDT
+0x0d140000 0x0d14ffff
+- SYSTEM
+- BPMP_TKE_WDT_0
+0x0d140000 0x0d14ffff
+- SYSTEM
+- BPMP_HSP
+0x0d150000 0x0d1dffff
+- SYSTEM
+- BPMP_HSP_COMMON
+0x0d150000 0x0d15ffff
+- SYSTEM
+- BPMP_HSP_SM
+0x0d160000 0x0d19ffff
+- SYSTEM
+- BPMP_HSP_SM_0_1
+0x0d160000 0x0d16ffff
+- SYSTEM
+- BPMP_HSP_SM_2_3
+0x0d170000 0x0d17ffff
+- SYSTEM
+- BPMP_HSP_SM_4_5
+0x0d180000 0x0d18ffff
+- SYSTEM
+- BPMP_HSP_SM_6_7
+0x0d190000 0x0d19ffff
+- SYSTEM
+- BPMP_HSP_SS
+0x0d1a0000 0x0d1dffff
+- SYSTEM
+- BPMP_HSP_SS_0
+0x0d1a0000 0x0d1affff
+- SYSTEM
+- BPMP_HSP_SS_1
+0x0d1b0000 0x0d1bffff
+- SYSTEM
+- BPMP_HSP_SS_2
+0x0d1c0000 0x0d1cffff
+- SYSTEM
+- BPMP_HSP_SS_3
+0x0d1d0000 0x0d1dffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- BPMP_GTE
+0x0d1e0000 0x0d1effff
+- SYSTEM
+- BPMP_PM
+0x0d1f0000 0x0d22ffff
+- SYSTEM
+- BPMP_PM_IMPL
+0x0d1f0000 0x0d1fffff
+- SYSTEM
+- BPMP_ACTMON
+0x0d200000 0x0d20ffff
+- SYSTEM
+- SECURE_BOOT
+0x0d210000 0x0d21ffff
+- SYSTEM
+- ACTMON
+0x0d230000 0x0d23ffff
+- SYSTEM
+- SOC_THERM
+0x0d280000 0x0d28ffff
+- SYSTEM
+- CENTRAL_VTG_CTLR
+0x0d290000 0x0d29ffff
+- SYSTEM
+- CENTRAL_PWR_MGR
+0x0d2a0000 0x0d2affff
+- SYSTEM
+- BPMP_CFG
+0x0d2c0000 0x0d2cffff
+- SYSTEM
+- BPMP_R5AXISLAVE
+0x0d400000 0x0d5fffff
+- SYSTEM
+- BPMP_ATCM_EXT
+0x0d400000 0x0d47ffff
+- SYSTEM
+- BPMP_ATCM_EVP_EXT
+0x0d400000 0x0d40ffff
+- SYSTEM
+- BPMP_BOOTROM_EXT
+0x0d410000 0x0d43ffff
+- SYSTEM
+- BPMP_BTCM
+0x0d480000 0x0d49ffff
+- SYSTEM
+- BPMP_ICACHE_ACCESS_POR
+T 0x0d500000 0x0d57ffff
+- SYSTEM
+- BPMP_DCACHE_ACCESS_PO
+- RT
+0x0d580000 0x0d5fffff
+- SYSTEM
+- BPMP_FABRIC
+0x0d600000 0x0d63ffff
+- SYSTEM
+- BPMP_SN_AXI2APB_1
+0x0d600000 0x0d600fff
+- SYSTEM
+- BPMP_MN_CPU_M_I
+0x0d610000 0x0d610fff
+- SYSTEM
+- BPMP_MN_CBB_I
+0x0d611000 0x0d611fff
+- SYSTEM
+- BPMP_MN_CPU_P_I
+0x0d612000 0x0d612fff
+- SYSTEM
+- BPMP_MN_DMA_P_I
+0x0d613000 0x0d613fff
+- SYSTEM
+- BPMP_MN_DMA_M_I
+0x0d614000 0x0d614fff
+- SYSTEM
+- BPMP_SN_AST0_T
+0x0d615000 0x0d615fff
+- SYSTEM
+- BPMP_SN_AST1_T
+0x0d616000 0x0d616fff
+- SYSTEM
+- BPMP_SN_CBB_T
+0x0d617000 0x0d617fff
+- SYSTEM
+- BPMP_SN_CPU_T
+0x0d618000 0x0d618fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- BPMP_EN_CFG
+0x0d619000 0x0d619fff
+- SYSTEM
+- BPMP_FABRIC_ERR_COLLATO
+R 0x0d620000 0x0d620fff
+- SYSTEM
+- BPMP_FIREWALL
+0x0d630000 0x0d630fff
+- SYSTEM
+- BPMP_ERR_COLLATOR
+0x0d650000 0x0d65ffff
+- SYSTEM
+- BPMP_MISC
+0x0d660000 0x0d66ffff
+- SYSTEM
+- BPMP_MISC_CFG
+0x0d660000 0x0d66efff
+- SYSTEM
+- BPMP_SCPM
+0x0d66f000 0x0d66ffff
+- SYSTEM
+- DCE_CLUSTER
+0x0d800000 0x0dffffff
+- SYSTEM
+- DCE_ATCM_CFG
+0x0d800000 0x0d81ffff
+- SYSTEM
+- DCE_ATCM_CFG_EVP
+0x0d800000 0x0d80ffff
+- SYSTEM
+- DCE_VIC_0
+0x0d820000 0x0d82ffff
+- SYSTEM
+- DCE_VIC_1
+0x0d830000 0x0d83ffff
+- SYSTEM
+- DCE_AST_0
+0x0d840000 0x0d84ffff
+- SYSTEM
+- DCE_AST_1
+0x0d850000 0x0d85ffff
+- SYSTEM
+- DCE_DMA
+0x0d860000 0x0d8effff
+- SYSTEM
+- DCE_DMA_COMMON
+0x0d860000 0x0d86ffff
+- SYSTEM
+- DCE_DMA_CH_0
+0x0d870000 0x0d87ffff
+- SYSTEM
+- DCE_DMA_CH_1
+0x0d880000 0x0d88ffff
+- SYSTEM
+- DCE_DMA_CH_2
+0x0d890000 0x0d89ffff
+- SYSTEM
+- DCE_DMA_CH_3
+0x0d8a0000 0x0d8affff
+- SYSTEM
+- DCE_DMA_CH_4
+0x0d8b0000 0x0d8bffff
+- SYSTEM
+- DCE_DMA_CH_5
+0x0d8c0000 0x0d8cffff
+- SYSTEM
+- DCE_DMA_CH_6
+0x0d8d0000 0x0d8dffff
+- SYSTEM
+- DCE_DMA_CH_7
+0x0d8e0000 0x0d8effff
+- SYSTEM
+- DCE_TKE
+0x0d8f0000 0x0d94ffff
+- SYSTEM
+- DCE_TKE_SHARED
+0x0d8f0000 0x0d8fffff
+- SYSTEM
+- DCE_TKE_TMR
+0x0d900000 0x0d93ffff
+- SYSTEM
+- DCE_TKE_TMR_0
+0x0d900000 0x0d90ffff
+- SYSTEM
+- DCE_TKE_TMR_1
+0x0d910000 0x0d91ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- DCE_TKE_TMR_2
+0x0d920000 0x0d92ffff
+- SYSTEM
+- DCE_TKE_TMR_3
+0x0d930000 0x0d93ffff
+- SYSTEM
+- DCE_TKE_WDT
+0x0d940000 0x0d94ffff
+- SYSTEM
+- DCE_TKE_WDT_0
+0x0d940000 0x0d94ffff
+- SYSTEM
+- DCE_HSP
+0x0d950000 0x0d9dffff
+- SYSTEM
+- DCE_HSP_COMMON
+0x0d950000 0x0d95ffff
+- SYSTEM
+- DCE_HSP_SM
+0x0d960000 0x0d99ffff
+- SYSTEM
+- DCE_HSP_SM_0_1
+0x0d960000 0x0d96ffff
+- SYSTEM
+- DCE_HSP_SM_2_3
+0x0d970000 0x0d97ffff
+- SYSTEM
+- DCE_HSP_SM_4_5
+0x0d980000 0x0d98ffff
+- SYSTEM
+- DCE_HSP_SM_6_7
+0x0d990000 0x0d99ffff
+- SYSTEM
+- DCE_HSP_SS
+0x0d9a0000 0x0d9dffff
+- SYSTEM
+- DCE_HSP_SS_0
+0x0d9a0000 0x0d9affff
+- SYSTEM
+- DCE_HSP_SS_1
+0x0d9b0000 0x0d9bffff
+- SYSTEM
+- DCE_HSP_SS_2
+0x0d9c0000 0x0d9cffff
+- SYSTEM
+- DCE_HSP_SS_3
+0x0d9d0000 0x0d9dffff
+- SYSTEM
+- DCE_GTE
+0x0d9e0000 0x0d9effff
+- SYSTEM
+- DCE_PM
+0x0d9f0000 0x0da2ffff
+- SYSTEM
+- DCE_PM_IMPL
+0x0d9f0000 0x0d9fffff
+- SYSTEM
+- DCE_ACTMON
+0x0da00000 0x0da0ffff
+- SYSTEM
+- DCE_CFG
+0x0da30000 0x0da3ffff
+- SYSTEM
+- DCE_HSM
+0x0da40000 0x0da4ffff
+- SYSTEM
+- DCE_R5AXISLAVE
+0x0dc00000 0x0ddfffff
+- SYSTEM
+- DCE_ATCM_EXT
+0x0dc00000 0x0dc7ffff
+- SYSTEM
+- DCE_ATCM_EVP_EXT
+0x0dc00000 0x0dc0ffff
+- SYSTEM
+- DCE_BTCM
+0x0dc80000 0x0dcdffff
+- SYSTEM
+- DCE_ICACHE_ACCESS_PORT
+0x0dd00000 0x0dd7ffff
+- SYSTEM
+- DCE_DCACHE_ACCESS_POR
+T 0x0dd80000 0x0ddfffff
+- SYSTEM
+- DCE_FABRIC
+0x0de00000 0x0de3ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- DCE_SN_AXI2APB_1
+0x0de00000 0x0de00fff
+- SYSTEM
+- DCE_MN_CPU_M_I
+0x0de10000 0x0de10fff
+- SYSTEM
+- DCE_MN_CBB_I
+0x0de11000 0x0de11fff
+- SYSTEM
+- DCE_MN_CPU_P_I
+0x0de12000 0x0de12fff
+- SYSTEM
+- DCE_MN_DMA_M_I
+0x0de13000 0x0de13fff
+- SYSTEM
+- DCE_MN_DMA_P_I
+0x0de14000 0x0de14fff
+- SYSTEM
+- DCE_SN_AST0_T
+0x0de15000 0x0de15fff
+- SYSTEM
+- DCE_SN_AST1_T
+0x0de16000 0x0de16fff
+- SYSTEM
+- DCE_SN_CBB_T
+0x0de17000 0x0de17fff
+- SYSTEM
+- DCE_SN_CPU_T
+0x0de18000 0x0de18fff
+- SYSTEM
+- DCE_EN_CFG
+0x0de19000 0x0de19fff
+- SYSTEM
+- DCE_FABRIC_ERR_COLLATOR
+0x0de20000 0x0de20fff
+- SYSTEM
+- DCE_FIREWALL
+0x0de30000 0x0de3ffff
+- SYSTEM
+- DCE_ERR_COLLATOR
+0x0de50000 0x0de5ffff
+- SYSTEM
+- DCE_MISC
+0x0de60000 0x0de6ffff
+- SYSTEM
+- DCE_HSP1
+0x0de70000 0x0defffff
+- SYSTEM
+- DCE_HSP1_COMMON
+0x0de70000 0x0de7ffff
+- SYSTEM
+- DCE_HSP1_SM
+0x0de80000 0x0debffff
+- SYSTEM
+- DCE_HSP1_SM_0_1
+0x0de80000 0x0de8ffff
+- SYSTEM
+- DCE_HSP1_SM_2_3
+0x0de90000 0x0de9ffff
+- SYSTEM
+- DCE_HSP1_SM_4_5
+0x0dea0000 0x0deaffff
+- SYSTEM
+- DCE_HSP1_SM_6_7
+0x0deb0000 0x0debffff
+- SYSTEM
+- DCE_HSP1_SS
+0x0dec0000 0x0defffff
+- SYSTEM
+- DCE_HSP1_SS_0
+0x0dec0000 0x0decffff
+- SYSTEM
+- DCE_HSP1_SS_1
+0x0ded0000 0x0dedffff
+- SYSTEM
+- DCE_HSP1_SS_2
+0x0dee0000 0x0deeffff
+- SYSTEM
+- DCE_HSP1_SS_3
+0x0def0000 0x0defffff
+- SYSTEM
+- DCE_HSP2
+0x0df00000 0x0df8ffff
+- SYSTEM
+- DCE_HSP2_COMMON
+0x0df00000 0x0df0ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- DCE_HSP2_SM
+0x0df10000 0x0df4ffff
+- SYSTEM
+- DCE_HSP2_SM_0_1
+0x0df10000 0x0df1ffff
+- SYSTEM
+- DCE_HSP2_SM_2_3
+0x0df20000 0x0df2ffff
+- SYSTEM
+- DCE_HSP2_SM_4_5
+0x0df30000 0x0df3ffff
+- SYSTEM
+- DCE_HSP2_SM_6_7
+0x0df40000 0x0df4ffff
+- SYSTEM
+- DCE_HSP2_SS
+0x0df50000 0x0df8ffff
+- SYSTEM
+- DCE_HSP2_SS_0
+0x0df50000 0x0df5ffff
+- SYSTEM
+- DCE_HSP2_SS_1
+0x0df60000 0x0df6ffff
+- SYSTEM
+- DCE_HSP2_SS_2
+0x0df70000 0x0df7ffff
+- SYSTEM
+- DCE_HSP2_SS_3
+0x0df80000 0x0df8ffff
+- SYSTEM
+- CCPLEX_MMCRAB_ARM
+0x0e000000 0x0e3fffff
+- CCPLEX
+- AXIS_NIC_0
+0x0f000000 0x0f0fffff
+- SYSTEM
+- RPG_PM
+0x0f100000 0x0f149fff
+- SYSTEM
+- RPG_PM_VI0
+0x0f100000 0x0f100fff
+- SYSTEM
+- RPG_PM_VI1
+0x0f101000 0x0f101fff
+- SYSTEM
+- RPG_PM_ISP0
+0x0f102000 0x0f102fff
+- SYSTEM
+- RPG_PM_VIC
+0x0f103000 0x0f103fff
+- SYSTEM
+- RPG_PM_OFA
+0x0f104000 0x0f104fff
+- SYSTEM
+- RPG_PM_PVA0_0
+0x0f105000 0x0f105fff
+- SYSTEM
+- RPG_PM_PVA0_1
+0x0f106000 0x0f106fff
+- SYSTEM
+- RPG_PM_PVA0_2
+0x0f107000 0x0f107fff
+- SYSTEM
+- RPG_PM_NVDLA0
+0x0f108000 0x0f108fff
+- SYSTEM
+- RPG_PM_NVDLA1
+0x0f109000 0x0f109fff
+- SYSTEM
+- RPG_PM_DISPLAY
+0x0f10a000 0x0f10afff
+- SYSTEM
+- RPG_PM_PMA
+0x0f10b000 0x0f10bfff
+- SYSTEM
+- RPG_PM_MGBE0
+0x0f10c000 0x0f10cfff
+- SYSTEM
+- RPG_PM_MGBE1
+0x0f10d000 0x0f10dfff
+- SYSTEM
+- RPG_PM_MGBE2
+0x0f10e000 0x0f10efff
+- SYSTEM
+- RPG_PM_MGBE3
+0x0f10f000 0x0f10ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- RPG_PM_SCF
+0x0f110000 0x0f110fff
+- SYSTEM
+- RPG_PM_NVDEC0
+0x0f111000 0x0f111fff
+- SYSTEM
+- RPG_PM_NVENC0
+0x0f112000 0x0f112fff
+- SYSTEM
+- RPG_PM_MSSNVL
+0x0f113000 0x0f113fff
+- SYSTEM
+- RPG_PM_PCIE_C0
+0x0f114000 0x0f114fff
+- SYSTEM
+- RPG_PM_PCIE_C1
+0x0f115000 0x0f115fff
+- SYSTEM
+- RPG_PM_PCIE_C2
+0x0f116000 0x0f116fff
+- SYSTEM
+- RPG_PM_PCIE_C3
+0x0f117000 0x0f117fff
+- SYSTEM
+- RPG_PM_PCIE_C4
+0x0f118000 0x0f118fff
+- SYSTEM
+- RPG_PM_PCIE_C5
+0x0f119000 0x0f119fff
+- SYSTEM
+- RPG_PM_PCIE_C6
+0x0f11a000 0x0f11afff
+- SYSTEM
+- RPG_PM_PCIE_C7
+0x0f11b000 0x0f11bfff
+- SYSTEM
+- RPG_PM_PCIE_C8
+0x0f11c000 0x0f11cfff
+- SYSTEM
+- RPG_PM_PCIE_C9
+0x0f11d000 0x0f11dfff
+- SYSTEM
+- RPG_PM_PCIE_C10
+0x0f11e000 0x0f11efff
+- SYSTEM
+- RPG_PM_MSS0
+0x0f11f000 0x0f11ffff
+- SYSTEM
+- RPG_PM_MSS1
+0x0f120000 0x0f120fff
+- SYSTEM
+- RPG_PM_MSS2
+0x0f121000 0x0f121fff
+- SYSTEM
+- RPG_PM_MSS3
+0x0f122000 0x0f122fff
+- SYSTEM
+- RPG_PM_MSS4
+0x0f123000 0x0f123fff
+- SYSTEM
+- RPG_PM_MSS5
+0x0f124000 0x0f124fff
+- SYSTEM
+- RPG_PM_MSS6
+0x0f125000 0x0f125fff
+- SYSTEM
+- RPG_PM_MSS7
+0x0f126000 0x0f126fff
+- SYSTEM
+- RPG_PM_MSS8
+0x0f127000 0x0f127fff
+- SYSTEM
+- RPG_PM_MSS9
+0x0f128000 0x0f128fff
+- SYSTEM
+- RPG_PM_MSS10
+0x0f129000 0x0f129fff
+- SYSTEM
+- RPG_PM_MSS11
+0x0f12a000 0x0f12afff
+- SYSTEM
+- RPG_PM_MSS12
+0x0f12b000 0x0f12bfff
+- SYSTEM
+- RPG_PM_MSS13
+0x0f12c000 0x0f12cfff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- RPG_PM_MSS14
+0x0f12d000 0x0f12dfff
+- SYSTEM
+- RPG_PM_MSS15
+0x0f12e000 0x0f12efff
+- SYSTEM
+- RPG_PM_MSSHUB0
+0x0f12f000 0x0f12ffff
+- SYSTEM
+- RPG_PM_MSSHUB1
+0x0f130000 0x0f130fff
+- SYSTEM
+- RPG_PM_MCF0
+0x0f131000 0x0f131fff
+- SYSTEM
+- RPG_PM_MCF1
+0x0f132000 0x0f132fff
+- SYSTEM
+- RPG_PM_MCF2
+0x0f133000 0x0f133fff
+- SYSTEM
+- PMA
+0x0f14a000 0x0f14bfff
+- SYSTEM
+- PMA_CFG
+0x0f14a000 0x0f14afff
+- SYSTEM
+- PMA_SEC
+0x0f14b000 0x0f14bfff
+- SYSTEM
+- RTR
+0x0f14d000 0x0f14dfff
+- SYSTEM
+- CCPLEX_GIC
+0x0f400000 0x0f7fffff
+- SYSTEM
+- CCPLEX_GICD
+0x0f400000 0x0f40ffff
+- SYSTEM
+- CCPLEX_GICA
+0x0f410000 0x0f41ffff
+- SYSTEM
+- CCPLEX_GICT
+0x0f420000 0x0f42ffff
+- SYSTEM
+- CCPLEX_GICP
+0x0f430000 0x0f43ffff
+- SYSTEM
+- CCPLEX_GICR0
+0x0f440000 0x0f45ffff
+- SYSTEM
+- CCPLEX_GICR1
+0x0f460000 0x0f47ffff
+- SYSTEM
+- CCPLEX_GICR2
+0x0f480000 0x0f49ffff
+- SYSTEM
+- CCPLEX_GICR3
+0x0f4a0000 0x0f4bffff
+- SYSTEM
+- CCPLEX_GICR4
+0x0f4c0000 0x0f4dffff
+- SYSTEM
+- CCPLEX_GICR5
+0x0f4e0000 0x0f4fffff
+- SYSTEM
+- CCPLEX_GICR6
+0x0f500000 0x0f51ffff
+- SYSTEM
+- CCPLEX_GICR7
+0x0f520000 0x0f53ffff
+- SYSTEM
+- CCPLEX_GICR8
+0x0f540000 0x0f55ffff
+- SYSTEM
+- CCPLEX_GICR9
+0x0f560000 0x0f57ffff
+- SYSTEM
+- CCPLEX_GICR10
+0x0f580000 0x0f59ffff
+- SYSTEM
+- CCPLEX_GICR11
+0x0f5a0000 0x0f5bffff
+- SYSTEM
+- CCPLEX_GICR12
+0x0f5c0000 0x0f5dffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- CCPLEX_GICR13
+0x0f5e0000 0x0f5fffff
+- SYSTEM
+- CCPLEX_GICR14
+0x0f600000 0x0f61ffff
+- SYSTEM
+- CCPLEX_GICR15
+0x0f620000 0x0f63ffff
+- SYSTEM
+- CCPLEX_GICDA
+0x0f640000 0x0f64ffff
+- SYSTEM
+- CCPLEX_GICFMU
+0x0f7f0000 0x0f7fffff
+- SYSTEM
+- SMMU2
+0x10000000 0x10ffffff
+- SYSTEM
+- SMMU1
+0x11000000 0x11ffffff
+- SYSTEM
+- SMMU0
+0x12000000 0x12ffffff
+- SYSTEM
+- DISP
+0x13800000 0x138effff
+- SYSTEM
+- DISP_CORE_1
+0x13800000 0x1383ffff
+- SYSTEM
+- DISP_EC
+0x13840000 0x13840fff
+- SYSTEM
+- DISP_CORE_2
+0x13841000 0x138effff
+- SYSTEM
+- CBB_FABRIC
+0x13a00000 0x13dfffff
+- SYSTEM
+- CBB_CENTRAL_CBB_FIREWA
+- LL
+0x13a10000 0x13a1ffff
+- SYSTEM
+- CBB_MN_AON
+0x13a30000 0x13a30fff
+- SYSTEM
+- CBB_MN_APE
+0x13a31000 0x13a31fff
+- SYSTEM
+- CBB_MN_BPMP
+0x13a32000 0x13a32fff
+- SYSTEM
+- CBB_MN_CBB_CENTRAL
+0x13a34000 0x13a34fff
+- SYSTEM
+- CBB_MN_CORESIGHT
+0x13a35000 0x13a35fff
+- SYSTEM
+- CBB_MN_GPCDMA_MMIO
+0x13a36000 0x13a36fff
+- SYSTEM
+- CBB_MN_JTAG
+0x13a37000 0x13a37fff
+- SYSTEM
+- CBB_MN_FSI
+0x13a38000 0x13a38fff
+- SYSTEM
+- CBB_MN_CCPLEX
+0x13a3a000 0x13a3afff
+- SYSTEM
+- CBB_MN_NVDEC
+0x13a3b000 0x13a3bfff
+- SYSTEM
+- CBB_MN_DCE
+0x13a3c000 0x13a3cfff
+- SYSTEM
+- CBB_MN_RCE
+0x13a3d000 0x13a3dfff
+- SYSTEM
+- CBB_MN_SCE
+0x13a3e000 0x13a3efff
+- SYSTEM
+- CBB_MN_CBB_CENTRAL_1
+0x13a3f000 0x13a3ffff
+- SYSTEM
+- CBB_SN_AON_SLAVE
+0x13a40000 0x13a40fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- CBB_SN_BPMP_SLAVE
+0x13a41000 0x13a41fff
+- SYSTEM
+- CBB_SN_CBB_CENTRAL
+0x13a42000 0x13a42fff
+- SYSTEM
+- CBB_SN_HOST1X
+0x13a43000 0x13a43fff
+- SYSTEM
+- CBB_SN_STM
+0x13a44000 0x13a44fff
+- SYSTEM
+- CBB_SN_FSI_SLAVE
+0x13a45000 0x13a45fff
+- SYSTEM
+- CBB_SN_PCIE_C1
+0x13a47000 0x13a47fff
+- SYSTEM
+- CBB_SN_PCIE_C2
+0x13a48000 0x13a48fff
+- SYSTEM
+- CBB_SN_PCIE_C3
+0x13a49000 0x13a49fff
+- SYSTEM
+- CBB_SN_PCIE_C0
+0x13a4a000 0x13a4afff
+- SYSTEM
+- CBB_SN_PCIE_C4
+0x13a4b000 0x13a4bfff
+- SYSTEM
+- CBB_SN_GPU
+0x13a4c000 0x13a4cfff
+- SYSTEM
+- CBB_SN_SMMU0
+0x13a4d000 0x13a4dfff
+- SYSTEM
+- CBB_SN_SMMU1
+0x13a4e000 0x13a4efff
+- SYSTEM
+- CBB_SN_SMMU2
+0x13a4f000 0x13a4ffff
+- SYSTEM
+- CBB_SN_SMMU3
+0x13a50000 0x13a50fff
+- SYSTEM
+- CBB_SN_SMMU4
+0x13a51000 0x13a51fff
+- SYSTEM
+- CBB_SN_PCIE_C10
+0x13a52000 0x13a52fff
+- SYSTEM
+- CBB_SN_PCIE_C7
+0x13a53000 0x13a53fff
+- SYSTEM
+- CBB_SN_PCIE_C8
+0x13a54000 0x13a54fff
+- SYSTEM
+- CBB_SN_PCIE_C9
+0x13a55000 0x13a55fff
+- SYSTEM
+- CBB_SN_PCIE_C5
+0x13a56000 0x13a56fff
+- SYSTEM
+- CBB_SN_PCIE_C6
+0x13a57000 0x13a57fff
+- SYSTEM
+- CBB_SN_DCE_SLAVE
+0x13a58000 0x13a58fff
+- SYSTEM
+- CBB_SN_RCE_SLAVE
+0x13a59000 0x13a59fff
+- SYSTEM
+- CBB_SN_SCE_SLAVE
+0x13a5a000 0x13a5afff
+- SYSTEM
+- CBB_EN_CFG
+0x13a60000 0x13a60fff
+- SYSTEM
+- CBB_SN_AXI2APB_1
+0x13a70000 0x13a70fff
+- SYSTEM
+- CBB_SN_AXI2APB_10
+0x13a71000 0x13a71fff
+- SYSTEM
+- CBB_SN_AXI2APB_11
+0x13a72000 0x13a72fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- CBB_SN_AXI2APB_12
+0x13a73000 0x13a73fff
+- SYSTEM
+- CBB_SN_AXI2APB_13
+0x13a74000 0x13a74fff
+- SYSTEM
+- CBB_SN_AXI2APB_14
+0x13a75000 0x13a75fff
+- SYSTEM
+- CBB_SN_AXI2APB_15
+0x13a76000 0x13a76fff
+- SYSTEM
+- CBB_SN_AXI2APB_16
+0x13a77000 0x13a77fff
+- SYSTEM
+- CBB_SN_AXI2APB_17
+0x13a78000 0x13a78fff
+- SYSTEM
+- CBB_SN_AXI2APB_18
+0x13a79000 0x13a79fff
+- SYSTEM
+- CBB_SN_AXI2APB_19
+0x13a7a000 0x13a7afff
+- SYSTEM
+- CBB_SN_AXI2APB_2
+0x13a7b000 0x13a7bfff
+- SYSTEM
+- CBB_SN_AXI2APB_20
+0x13a7c000 0x13a7cfff
+- SYSTEM
+- CBB_SN_AXI2APB_21
+0x13a7d000 0x13a7dfff
+- SYSTEM
+- CBB_SN_AXI2APB_22
+0x13a7e000 0x13a7efff
+- SYSTEM
+- CBB_SN_AXI2APB_23
+0x13a7f000 0x13a7ffff
+- SYSTEM
+- CBB_SN_AXI2APB_25
+0x13a80000 0x13a80fff
+- SYSTEM
+- CBB_SN_AXI2APB_26
+0x13a81000 0x13a81fff
+- SYSTEM
+- CBB_SN_AXI2APB_27
+0x13a82000 0x13a82fff
+- SYSTEM
+- CBB_SN_AXI2APB_28
+0x13a83000 0x13a83fff
+- SYSTEM
+- CBB_SN_AXI2APB_29
+0x13a84000 0x13a84fff
+- SYSTEM
+- CBB_SN_AXI2APB_30
+0x13a85000 0x13a85fff
+- SYSTEM
+- CBB_SN_AXI2APB_31
+0x13a86000 0x13a86fff
+- SYSTEM
+- CBB_SN_AXI2APB_32
+0x13a87000 0x13a87fff
+- SYSTEM
+- CBB_SN_AXI2APB_33
+0x13a88000 0x13a88fff
+- SYSTEM
+- CBB_SN_AXI2APB_34
+0x13a89000 0x13a89fff
+- SYSTEM
+- CBB_SN_AXI2APB_4
+0x13a8b000 0x13a8bfff
+- SYSTEM
+- CBB_SN_AXI2APB_5
+0x13a8c000 0x13a8cfff
+- SYSTEM
+- CBB_SN_AXI2APB_6
+0x13a8d000 0x13a8dfff
+- SYSTEM
+- CBB_SN_AXI2APB_7
+0x13a8e000 0x13a8efff
+- SYSTEM
+- CBB_SN_AXI2APB_8
+0x13a8f000 0x13a8ffff
+- SYSTEM
+- CBB_SN_AXI2APB_9
+0x13a90000 0x13a90fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- CBB_SN_AXI2APB_3
+0x13a91000 0x13a91fff
+- SYSTEM
+- CBB_SN_AXI2APB_35
+0x13a92000 0x13a92fff
+- SYSTEM
+- CBB_ERR_COLLATOR_0
+0x13aa0000 0x13aa0fff
+- SYSTEM
+- CBB_ERR_COLLATOR_1
+0x13aa1000 0x13aa1fff
+- SYSTEM
+- CBB_ERR_COLLATOR_2
+0x13aa2000 0x13aa2fff
+- SYSTEM
+- CBB_ERR_COLLATOR_3
+0x13aa3000 0x13aa3fff
+- SYSTEM
+- CBB_ERR_COLLATOR_4
+0x13aa4000 0x13aa4fff
+- SYSTEM
+- CBB_ERR_COLLATOR_5
+0x13aa5000 0x13aa5fff
+- SYSTEM
+- CBB_ERR_COLLATOR_6
+0x13aa6000 0x13aa6fff
+- SYSTEM
+- CBB_ERR_COLLATOR_7
+0x13aa7000 0x13aa7fff
+- SYSTEM
+- CBB_ERR_COLLATOR_8
+0x13aa8000 0x13aa8fff
+- SYSTEM
+- CBB_ERR_COLLATOR_9
+0x13aa9000 0x13aa9fff
+- SYSTEM
+- CBB_ERR_COLLATOR_10
+0x13aaa000 0x13aaafff
+- SYSTEM
+- CBB_ERR_COLLATOR_11
+0x13aab000 0x13aabfff
+- SYSTEM
+- CBB_ERR_COLLATOR_12
+0x13aac000 0x13aacfff
+- SYSTEM
+- CBB_ERR_COLLATOR_13
+0x13aad000 0x13aadfff
+- SYSTEM
+- CBB_ERR_COLLATOR_14
+0x13aae000 0x13aaefff
+- SYSTEM
+- CBB_ERR_COLLATOR_15
+0x13aaf000 0x13aaffff
+- SYSTEM
+- CBB_ERR_COLLATOR_16
+0x13ab0000 0x13ab0fff
+- SYSTEM
+- CBB_ERR_COLLATOR_17
+0x13ab1000 0x13ab1fff
+- SYSTEM
+- CBB_ERR_COLLATOR_18
+0x13ab2000 0x13ab2fff
+- SYSTEM
+- CBB_ERR_COLLATOR_19
+0x13ab3000 0x13ab3fff
+- SYSTEM
+- CBB_ERR_COLLATOR_20
+0x13ab4000 0x13ab4fff
+- SYSTEM
+- CBB_ERR_COLLATOR_21
+0x13ab5000 0x13ab5fff
+- SYSTEM
+- CBB_ERR_COLLATOR_22
+0x13ab6000 0x13ab6fff
+- SYSTEM
+- CBB_ERR_COLLATOR_23
+0x13ab7000 0x13ab7fff
+- SYSTEM
+- CBB_ERR_COLLATOR_24
+0x13ab8000 0x13ab8fff
+- SYSTEM
+- CBB_ERR_COLLATOR_25
+0x13ab9000 0x13ab9fff
+- SYSTEM
+- CBB_ERR_COLLATOR_26
+0x13aba000 0x13abafff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- CBB_ERR_COLLATOR_27
+0x13abb000 0x13abbfff
+- SYSTEM
+- CBB_ERR_COLLATOR_28
+0x13abc000 0x13abcfff
+- SYSTEM
+- CBB_ERR_COLLATOR_29
+0x13abd000 0x13abdfff
+- SYSTEM
+- CBB_ERR_COLLATOR_30
+0x13abe000 0x13abefff
+- SYSTEM
+- CBB_ERR_COLLATOR_31
+0x13abf000 0x13abffff
+- SYSTEM
+- CBB_ERR_COLLATOR_32
+0x13ac0000 0x13ac0fff
+- SYSTEM
+- CBB_ERR_COLLATOR_33
+0x13ac1000 0x13ac1fff
+- SYSTEM
+- CBB_ERR_COLLATOR_34
+0x13ac2000 0x13ac2fff
+- SYSTEM
+- HOST1X
+0x13e00000 0x13fcffff
+- SYSTEM
+- HOST1X_COMMON
+0x13e00000 0x13e0ffff
+- SYSTEM
+- HOST1X_HYPERVISOR
+0x13e10000 0x13e1ffff
+- SYSTEM
+- HOST1X_R5_CLUSTER
+0x13e20000 0x13e2ffff
+- SYSTEM
+- HOST1X_HSM
+0x13e30000 0x13e3ffff
+- SYSTEM
+- HOST1X_0
+0x13e40000 0x13e4ffff
+- SYSTEM
+- HOST1X_1
+0x13e50000 0x13e5ffff
+- SYSTEM
+- HOST1X_2
+0x13e60000 0x13e6ffff
+- SYSTEM
+- HOST1X_3
+0x13e70000 0x13e7ffff
+- SYSTEM
+- HOST1X_4
+0x13e80000 0x13e8ffff
+- SYSTEM
+- HOST1X_5
+0x13e90000 0x13e9ffff
+- SYSTEM
+- HOST1X_6
+0x13ea0000 0x13eaffff
+- SYSTEM
+- HOST1X_7
+0x13eb0000 0x13ebffff
+- SYSTEM
+- HOST1X_ACTMON0
+0x13ef0000 0x13efffff
+- SYSTEM
+- HOST1X_ACTMON1
+0x13f00000 0x13f0ffff
+- SYSTEM
+- HOST1X_ACTMON2
+0x13f10000 0x13f1ffff
+- SYSTEM
+- HOST1X_ACTMON3
+0x13f20000 0x13f2ffff
+- SYSTEM
+- HOST1X_ACTMON4
+0x13f30000 0x13f3ffff
+- SYSTEM
+- HOST1X_ACTMON5
+0x13f40000 0x13f4ffff
+- SYSTEM
+- PCIE_CTL
+0x14080000 0x141fffff
+- SYSTEM
+- PCIE_C8_CTL
+0x140a0000 0x140bffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- PCIE_C8_CTL_NONSECURE
+0x140a0000 0x140affff
+- SYSTEM
+- PCIE_C8_CTL_SECURE
+0x140b0000 0x140bffff
+- SYSTEM
+- PCIE_C9_CTL
+0x140c0000 0x140dffff
+- SYSTEM
+- PCIE_C9_CTL_NONSECURE
+0x140c0000 0x140cffff
+- SYSTEM
+- PCIE_C9_CTL_SECURE
+0x140d0000 0x140dffff
+- SYSTEM
+- PCIE_C10_CTL
+0x140e0000 0x140fffff
+- SYSTEM
+- PCIE_C10_CTL_NONSECURE
+0x140e0000 0x140effff
+- SYSTEM
+- PCIE_C10_CTL_SECURE
+0x140f0000 0x140fffff
+- SYSTEM
+- PCIE_C1_CTL
+0x14100000 0x1411ffff
+- SYSTEM
+- PCIE_C1_CTL_NONSECURE
+0x14100000 0x1410ffff
+- SYSTEM
+- PCIE_C1_CTL_SECURE
+0x14110000 0x1411ffff
+- SYSTEM
+- PCIE_C2_CTL
+0x14120000 0x1413ffff
+- SYSTEM
+- PCIE_C2_CTL_NONSECURE
+0x14120000 0x1412ffff
+- SYSTEM
+- PCIE_C2_CTL_SECURE
+0x14130000 0x1413ffff
+- SYSTEM
+- PCIE_C3_CTL
+0x14140000 0x1415ffff
+- SYSTEM
+- PCIE_C3_CTL_NONSECURE
+0x14140000 0x1414ffff
+- SYSTEM
+- PCIE_C3_CTL_SECURE
+0x14150000 0x1415ffff
+- SYSTEM
+- PCIE_C4_CTL
+0x14160000 0x1417ffff
+- SYSTEM
+- PCIE_C4_CTL_NONSECURE
+0x14160000 0x1416ffff
+- SYSTEM
+- PCIE_C4_CTL_SECURE
+0x14170000 0x1417ffff
+- SYSTEM
+- PCIE_C0_CTL
+0x14180000 0x1419ffff
+- SYSTEM
+- PCIE_C0_CTL_NONSECURE
+0x14180000 0x1418ffff
+- SYSTEM
+- PCIE_C0_CTL_SECURE
+0x14190000 0x1419ffff
+- SYSTEM
+- PCIE_C5_CTL
+0x141a0000 0x141bffff
+- SYSTEM
+- PCIE_C5_CTL_NONSECURE
+0x141a0000 0x141affff
+- SYSTEM
+- PCIE_C5_CTL_SECURE
+0x141b0000 0x141bffff
+- SYSTEM
+- PCIE_C6_CTL
+0x141c0000 0x141dffff
+- SYSTEM
+- PCIE_C6_CTL_NONSECURE
+0x141c0000 0x141cffff
+- SYSTEM
+- PCIE_C6_CTL_SECURE
+0x141d0000 0x141dffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- PCIE_C7_CTL
+0x141e0000 0x141fffff
+- SYSTEM
+- PCIE_C7_CTL_NONSECURE
+0x141e0000 0x141effff
+- SYSTEM
+- PCIE_C7_CTL_SECURE
+0x141f0000 0x141fffff
+- SYSTEM
+- ISP
+0x14800000 0x14afffff
+- SYSTEM
+- ISP_THI
+0x14b00000 0x14bfffff
+- SYSTEM
+- ISP_THI_CPU
+0x14b00000 0x14b07fff
+- SYSTEM
+- ISP_THI_EC
+0x14b08000 0x14b08fff
+- SYSTEM
+- ISP_THI_ENGINE
+0x14b09000 0x14bfffff
+- SYSTEM
+- VI2
+0x14c00000 0x14efffff
+- SYSTEM
+- VI2_THI
+0x14f00000 0x14ffffff
+- SYSTEM
+- VI2_THI_CPU
+0x14f00000 0x14f03fff
+- SYSTEM
+- VI2_THI_EC
+0x14f04000 0x14f04fff
+- SYSTEM
+- VI2_THI_ENGINE
+0x14f05000 0x14ffffff
+- SYSTEM
+- SEU1SE1
+0x15180000 0x1518ffff
+- SYSTEM
+- SEU1SE2
+0x15190000 0x1519ffff
+- SYSTEM
+- SEU1SE3
+0x151a0000 0x151affff
+- SYSTEM
+- SEU1SE4
+0x151b0000 0x151bffff
+- SYSTEM
+- VIC
+0x15340000 0x1537ffff
+- SYSTEM
+- VIC_SEC
+0x1534e000 0x1534efff
+- SYSTEM
+- VIC_EC
+0x1534f000 0x1534ffff
+- SYSTEM
+- NVJPG
+0x15380000 0x153bffff
+- SYSTEM
+- NVDEC
+0x15480000 0x154bffff
+- SYSTEM
+- NVENC
+0x154c0000 0x154fffff
+- SYSTEM
+- NVENC_SEC
+0x154ce000 0x154cefff
+- SYSTEM
+- NVENC_EC
+0x154cf000 0x154cffff
+- SYSTEM
+- NVJPG1
+0x15540000 0x1557ffff
+- SYSTEM
+- DPAUX
+0x155c0000 0x155cffff
+- SYSTEM
+- SE1
+0x15810000 0x1581ffff
+- SYSTEM
+- SE2
+0x15820000 0x1582ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- SE3
+0x15830000 0x1583ffff
+- SYSTEM
+- SE4
+0x15840000 0x1584ffff
+- SYSTEM
+- NVDLA0
+0x15880000 0x158bffff
+- SYSTEM
+- NVDLA0_ENGINE
+0x15880000 0x158befff
+- SYSTEM
+- NVDLA0_EC
+0x158bf000 0x158bffff
+- SYSTEM
+- NVDLA1
+0x158c0000 0x158fffff
+- SYSTEM
+- NVDLA1_ENGINE
+0x158c0000 0x158fefff
+- SYSTEM
+- NVDLA1_EC
+0x158ff000 0x158fffff
+- SYSTEM
+- NVCSI
+0x15a00000 0x15a4ffff
+- SYSTEM
+- NVCSI_ENGINE
+0x15a00000 0x15a4afff
+- SYSTEM
+- NVCSI_EC
+0x15a4b000 0x15a4ffff
+- SYSTEM
+- OFA
+0x15a50000 0x15a5ffff
+- SYSTEM
+- OFA_SEC
+0x15a5e000 0x15a5efff
+- SYSTEM
+- OFA_EC
+0x15a5f000 0x15a5ffff
+- SYSTEM
+- VI
+0x15c00000 0x15efffff
+- SYSTEM
+- VI_THI
+0x15f00000 0x15ffffff
+- SYSTEM
+- VI_THI_CPU
+0x15f00000 0x15f03fff
+- SYSTEM
+- VI_THI_EC
+0x15f04000 0x15f04fff
+- SYSTEM
+- VI_THI_ENGINE
+0x15f05000 0x15ffffff
+- SYSTEM
+- PVA0_CLUSTER
+0x16000000 0x167fffff
+- SYSTEM
+- PVA0_EVP
+0x16000000 0x1600ffff
+- SYSTEM
+- PVA0_SYNC
+0x16010000 0x1601ffff
+- SYSTEM
+- PVA0_SEC
+0x16020000 0x1602ffff
+- SYSTEM
+- PVA0_SEC_COLLATOR
+0x16020000 0x16027fff
+- SYSTEM
+- PVA0_SEC_EVENT_INTR
+0x16028000 0x1602ffff
+- SYSTEM
+- PVA0_PROC
+0x16030000 0x1603ffff
+- SYSTEM
+- PVA0_VPS0
+0x16040000 0x1604ffff
+- PVA0
+- PVA0_VPUMEM0
+0x16040000 0x16047fff
+- PVA0
+- PVA0_ICACHE0
+0x16048000 0x1604ffff
+- PVA0
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- PVA0_VPS1
+0x16050000 0x1605ffff
+- PVA0
+- PVA0_VPUMEM1
+0x16050000 0x16057fff
+- PVA0
+- PVA0_ICACHE1
+0x16058000 0x1605ffff
+- PVA0
+- PVA0_VIC
+0x16060000 0x1606ffff
+- PVA0
+- PVA0_DMA0
+0x160a0000 0x160cffff
+- SYSTEM
+- PVA0_DMA0_REG_CH_0
+0x160a0000 0x160a0fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_1
+0x160a2000 0x160a2fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_2
+0x160a4000 0x160a4fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_3
+0x160a6000 0x160a6fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_4
+0x160a8000 0x160a8fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_5
+0x160aa000 0x160aafff
+- SYSTEM
+- PVA0_DMA0_REG_CH_6
+0x160ac000 0x160acfff
+- SYSTEM
+- PVA0_DMA0_REG_CH_7
+0x160ae000 0x160aefff
+- SYSTEM
+- PVA0_DMA0_REG_CH_8
+0x160b0000 0x160b0fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_9
+0x160b2000 0x160b2fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_10
+0x160b4000 0x160b4fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_11
+0x160b6000 0x160b6fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_12
+0x160b8000 0x160b8fff
+- SYSTEM
+- PVA0_DMA0_REG_CH_13
+0x160ba000 0x160bafff
+- SYSTEM
+- PVA0_DMA0_REG_CH_14
+0x160bc000 0x160bcfff
+- SYSTEM
+- PVA0_DMA0_REG_CH_15
+0x160be000 0x160befff
+- SYSTEM
+- PVA0_DMA0_COMMON
+0x160c0000 0x160c0fff
+- SYSTEM
+- PVA0_DMA0_DESCRAM
+0x160c1000 0x160c1fff
+- SYSTEM
+- PVA0_DMA0_HWSEQRAM
+0x160c2000 0x160c2fff
+- SYSTEM
+- PVA0_DMA1
+0x160d0000 0x160fffff
+- SYSTEM
+- PVA0_DMA1_REG_CH_0
+0x160d0000 0x160d0fff
+- SYSTEM
+- PVA0_DMA1_REG_CH_1
+0x160d2000 0x160d2fff
+- SYSTEM
+- PVA0_DMA1_REG_CH_2
+0x160d4000 0x160d4fff
+- SYSTEM
+- PVA0_DMA1_REG_CH_3
+0x160d6000 0x160d6fff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- PVA0_DMA1_REG_CH_4
+0x160d8000 0x160d8fff
+- SYSTEM
+- PVA0_DMA1_REG_CH_5
+0x160da000 0x160dafff
+- SYSTEM
+- PVA0_DMA1_REG_CH_6
+0x160dc000 0x160dcfff
+- SYSTEM
+- PVA0_DMA1_REG_CH_7
+0x160de000 0x160defff
+- SYSTEM
+- PVA0_DMA1_REG_CH_8
+0x160e0000 0x160e0fff
+- SYSTEM
+- PVA0_DMA1_REG_CH_9
+0x160e2000 0x160e2fff
+- SYSTEM
+- PVA0_DMA1_REG_CH_10
+0x160e4000 0x160e4fff
+- SYSTEM
+- PVA0_DMA1_REG_CH_11
+0x160e6000 0x160e6fff
+- SYSTEM
+- PVA0_DMA1_REG_CH_12
+0x160e8000 0x160e8fff
+- SYSTEM
+- PVA0_DMA1_REG_CH_13
+0x160ea000 0x160eafff
+- SYSTEM
+- PVA0_DMA1_REG_CH_14
+0x160ec000 0x160ecfff
+- SYSTEM
+- PVA0_DMA1_REG_CH_15
+0x160ee000 0x160eefff
+- SYSTEM
+- PVA0_DMA1_COMMON
+0x160f0000 0x160f0fff
+- SYSTEM
+- PVA0_DMA1_DESCRAM
+0x160f1000 0x160f1fff
+- SYSTEM
+- PVA0_DMA1_HWSEQRAM
+0x160f2000 0x160f2fff
+- SYSTEM
+- PVA0_TKE
+0x16100000 0x1615ffff
+- PVA0
+- PVA0_TKE_SHARED
+0x16100000 0x1610ffff
+- PVA0
+- PVA0_TKE_TMR
+0x16110000 0x1614ffff
+- PVA0
+- PVA0_TKE_TMR_0
+0x16110000 0x1611ffff
+- PVA0
+- PVA0_TKE_TMR_1
+0x16120000 0x1612ffff
+- PVA0
+- PVA0_TKE_TMR_2
+0x16130000 0x1613ffff
+- PVA0
+- PVA0_TKE_TMR_3
+0x16140000 0x1614ffff
+- PVA0
+- PVA0_TKE_WDT
+0x16150000 0x1615ffff
+- PVA0
+- PVA0_TKE_WDT_0
+0x16150000 0x1615ffff
+- PVA0
+- PVA0_HSP
+0x16160000 0x161effff
+- SYSTEM
+- PVA0_HSP_COMMON
+0x16160000 0x1616ffff
+- SYSTEM
+- PVA0_HSP_SM
+0x16170000 0x161affff
+- SYSTEM
+- PVA0_HSP_SM_0_1
+0x16170000 0x1617ffff
+- SYSTEM
+- PVA0_HSP_SM_2_3
+0x16180000 0x1618ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- PVA0_HSP_SM_4_5
+0x16190000 0x1619ffff
+- SYSTEM
+- PVA0_HSP_SM_6_7
+0x161a0000 0x161affff
+- SYSTEM
+- PVA0_HSP_SS
+0x161b0000 0x161effff
+- SYSTEM
+- PVA0_HSP_SS_0
+0x161b0000 0x161bffff
+- SYSTEM
+- PVA0_HSP_SS_1
+0x161c0000 0x161cffff
+- SYSTEM
+- PVA0_HSP_SS_2
+0x161d0000 0x161dffff
+- SYSTEM
+- PVA0_HSP_SS_3
+0x161e0000 0x161effff
+- SYSTEM
+- PVA0_GTE
+0x161f0000 0x161fffff
+- PVA0
+- PVA0_PM
+0x16200000 0x1620ffff
+- SYSTEM
+- PVA0_ACTMON
+0x16210000 0x1621ffff
+- SYSTEM
+- PVA0_ACTMON_SHARED
+0x16210000 0x16217fff
+- SYSTEM
+- PVA0_MM_ACTMON0
+0x16218000 0x1621bfff
+- SYSTEM
+- PVA0_MM_ACTMON1
+0x1621c000 0x1621ffff
+- SYSTEM
+- PVA0_RAMIC
+0x16220000 0x16227fff
+- PVA0
+- PVA0_L2RAMIC
+0x16228000 0x1622ffff
+- PVA0
+- PVA0_IC
+0x16230000 0x1623ffff
+- PVA0
+- PVA0_IC_ERR_OBSERVER
+0x16230000 0x16233fff
+- PVA0
+- PVA0_IC_FAULT_PWR
+0x16234000 0x16237fff
+- PVA0
+- PVA0_IC_QOS
+0x16238000 0x1623bfff
+- PVA0
+- PVA0_CFG
+0x16240000 0x162dffff
+- SYSTEM
+- PVA0_L2SRAM
+0x16400000 0x164fffff
+- SYSTEM
+- PVA0_R5AXISLAVE
+0x16500000 0x165fffff
+- SYSTEM
+- PVA0_ATCM_EXT
+0x16500000 0x1653ffff
+- SYSTEM
+- PVA0_ATCM_EVP_EXT
+0x16500000 0x1650ffff
+- SYSTEM
+- PVA0_BTCM
+0x16540000 0x1655ffff
+- PVA0
+- PVA0_ICACHE_ACCESS_POR
+T 0x16580000 0x16583fff
+- SYSTEM
+- PVA0_DCACHE_ACCESS_POR
+T 0x165c0000 0x165c3fff
+- SYSTEM
+- GPU
+0x17000000 0x1fffffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- CAR
+0x20000000 0x21ffffff
+- SYSTEM
+- SYS_CAR
+0x20000000 0x2000ffff
+- SYSTEM
+- PLLMSC_CAR
+0x20020000 0x2002ffff
+- SYSTEM
+- PLLMSD_CAR
+0x20030000 0x2003ffff
+- SYSTEM
+- PLLE_CAR
+0x20040000 0x2004ffff
+- SYSTEM
+- PLLC_CAR
+0x20050000 0x2005ffff
+- SYSTEM
+- PLLM_CAR
+0x20060000 0x2006ffff
+- SYSTEM
+- PLLP_CAR
+0x20070000 0x2007ffff
+- SYSTEM
+- PLLA_CAR
+0x20080000 0x2008ffff
+- SYSTEM
+- I2S2_CAR
+0x200c0000 0x200cffff
+- SYSTEM
+- I2S3_CAR
+0x200d0000 0x200dffff
+- SYSTEM
+- SPI3_CAR
+0x20110000 0x2011ffff
+- SYSTEM
+- I2C1_CAR
+0x20120000 0x2012ffff
+- SYSTEM
+- I2C5_CAR
+0x20130000 0x2013ffff
+- SYSTEM
+- SPI1_CAR
+0x20140000 0x2014ffff
+- SYSTEM
+- ISP_CAR
+0x20170000 0x2017ffff
+- SYSTEM
+- VI_CAR
+0x20180000 0x2018ffff
+- SYSTEM
+- SDMMC1_CAR
+0x20190000 0x2019ffff
+- SYSTEM
+- SDMMC4_CAR
+0x201b0000 0x201bffff
+- SYSTEM
+- UARTA_CAR
+0x201c0000 0x201cffff
+- SYSTEM
+- UARTB_CAR
+0x201d0000 0x201dffff
+- SYSTEM
+- HOST1X_CAR
+0x201e0000 0x201effff
+- SYSTEM
+- HOST1X_RESET_CAR
+0x201e0000 0x201e0fff
+- SYSTEM
+- HOST1X_CLOCK_CAR
+0x201e1000 0x201effff
+- SYSTEM
+- EMC_CAR
+0x20200000 0x2020ffff
+- SYSTEM
+- EMC_RESET_CAR
+0x20200000 0x20200fff
+- SYSTEM
+- EMC_CLOCK_CAR
+0x20201000 0x2020ffff
+- SYSTEM
+- EMCHUB_CAR
+0x20210000 0x2021ffff
+- SYSTEM
+- EXTPERIPH4_CAR
+0x20220000 0x2022ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- SPI4_CAR
+0x20230000 0x2023ffff
+- SYSTEM
+- I2C3_CAR
+0x20240000 0x2024ffff
+- SYSTEM
+- UARTD_CAR
+0x20260000 0x2026ffff
+- SYSTEM
+- CSITE_CAR
+0x20280000 0x2028ffff
+- SYSTEM
+- I2S1_CAR
+0x20290000 0x2029ffff
+- SYSTEM
+- LA_CAR
+0x202c0000 0x202cffff
+- SYSTEM
+- I2S4_CAR
+0x20300000 0x2030ffff
+- SYSTEM
+- I2S5_CAR
+0x20310000 0x2031ffff
+- SYSTEM
+- I2C4_CAR
+0x20320000 0x2032ffff
+- SYSTEM
+- AHUB_CAR
+0x20330000 0x2033ffff
+- SYSTEM
+- EXTPERIPH1_CAR
+0x20360000 0x2036ffff
+- SYSTEM
+- EXTPERIPH2_CAR
+0x20370000 0x2037ffff
+- SYSTEM
+- EXTPERIPH3_CAR
+0x20380000 0x2038ffff
+- SYSTEM
+- I2C_SLOW_CAR
+0x20390000 0x2039ffff
+- SYSTEM
+- SOR1_CAR
+0x203a0000 0x203affff
+- SYSTEM
+- SOR0_CAR
+0x203b0000 0x203bffff
+- SYSTEM
+- HDA_CAR
+0x203d0000 0x203dffff
+- SYSTEM
+- UTMIP_CAR
+0x203f0000 0x203fffff
+- SYSTEM
+- APE_CAR
+0x20400000 0x2040ffff
+- SYSTEM
+- PLLREFE_CAR
+0x20420000 0x2042ffff
+- SYSTEM
+- PLLC2_CAR
+0x20430000 0x2043ffff
+- SYSTEM
+- PLLC3_CAR
+0x20440000 0x2044ffff
+- SYSTEM
+- PLLC4_CAR
+0x20460000 0x2046ffff
+- SYSTEM
+- XUSB_CAR
+0x20470000 0x2047ffff
+- SYSTEM
+- XUSB_RESET_CAR
+0x20470000 0x20470fff
+- SYSTEM
+- XUSB_CLOCK_CAR
+0x20471000 0x2047ffff
+- SYSTEM
+- DSI_CAR
+0x204b0000 0x204bffff
+- SYSTEM
+- ENTROPY_CAR
+0x204d0000 0x204dffff
+- SYSTEM
+- DVFS_CAR
+0x204e0000 0x204effff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- DMIC1_CAR
+0x20500000 0x2050ffff
+- SYSTEM
+- DMIC2_CAR
+0x20510000 0x2051ffff
+- SYSTEM
+- AUD_MCLK_CAR
+0x20520000 0x2052ffff
+- SYSTEM
+- I2C6_CAR
+0x20530000 0x2053ffff
+- SYSTEM
+- UART_FST_MIPI_CAL_CAR
+0x20550000 0x2055ffff
+- SYSTEM
+- VIC_CAR
+0x20560000 0x2056ffff
+- SYSTEM
+- SDMMC_LEGACY_TM_CAR
+0x20570000 0x2057ffff
+- SYSTEM
+- NVDEC_CAR
+0x20580000 0x2058ffff
+- SYSTEM
+- NVJPG_CAR
+0x20590000 0x2059ffff
+- SYSTEM
+- NVENC_CAR
+0x205a0000 0x205affff
+- SYSTEM
+- PLLA1_CAR
+0x205b0000 0x205bffff
+- SYSTEM
+- QSPI0_CAR
+0x205c0000 0x205cffff
+- SYSTEM
+- USB2_HSIC_TRK_CAR
+0x205e0000 0x205effff
+- SYSTEM
+- PEX_SATA_USB_BYP_CAR
+0x205f0000 0x205fffff
+- SYSTEM
+- MAUD_CAR
+0x20600000 0x2060ffff
+- SYSTEM
+- ADSP_CAR
+0x20620000 0x2062ffff
+- SYSTEM
+- MPHY_CAR
+0x20650000 0x2065ffff
+- SYSTEM
+- PLLNVCSI_CAR
+0x20660000 0x2066ffff
+- SYSTEM
+- PLLBPMPCAM_CAR
+0x20670000 0x2067ffff
+- SYSTEM
+- PLLMSB_CAR
+0x20690000 0x2069ffff
+- SYSTEM
+- AXI_CBB_CAR
+0x206a0000 0x206affff
+- SYSTEM
+- AXI_CBB_RESET_CAR
+0x206a0000 0x206a0fff
+- SYSTEM
+- AXI_CBB_CLOCK_CAR
+0x206a1000 0x206affff
+- SYSTEM
+- DMIC3_CAR
+0x207b0000 0x207bffff
+- SYSTEM
+- DMIC4_CAR
+0x207c0000 0x207cffff
+- SYSTEM
+- DSPK1_CAR
+0x207d0000 0x207dffff
+- SYSTEM
+- DSPK2_CAR
+0x207e0000 0x207effff
+- SYSTEM
+- I2S6_CAR
+0x207f0000 0x207fffff
+- SYSTEM
+- NVDISPLAY0_CAR
+0x20800000 0x2080ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- NVDISPLAY1_CAR
+0x20810000 0x2081ffff
+- SYSTEM
+- NVDISPLAY2_CAR
+0x20820000 0x2082ffff
+- SYSTEM
+- NVDISPLAY3_CAR
+0x20830000 0x2083ffff
+- SYSTEM
+- GPIO_CTL0_CAR
+0x20840000 0x2084ffff
+- SYSTEM
+- GPIO_CTL0_RESET_CAR
+0x20840000 0x20840fff
+- SYSTEM
+- GPIO_CTL0_CLOCK_CAR
+0x20841000 0x2084ffff
+- SYSTEM
+- GPIO_CTL1_CAR
+0x20850000 0x2085ffff
+- SYSTEM
+- GPIO_CTL1_RESET_CAR
+0x20850000 0x20850fff
+- SYSTEM
+- GPIO_CTL1_CLOCK_CAR
+0x20851000 0x2085ffff
+- SYSTEM
+- GPIO_CTL2_CAR
+0x20860000 0x2086ffff
+- SYSTEM
+- GPIO_CTL2_RESET_CAR
+0x20860000 0x20860fff
+- SYSTEM
+- GPIO_CTL2_CLOCK_CAR
+0x20861000 0x2086ffff
+- SYSTEM
+- GPIO_CTL3_CAR
+0x20870000 0x2087ffff
+- SYSTEM
+- GPIO_CTL3_RESET_CAR
+0x20870000 0x20870fff
+- SYSTEM
+- GPIO_CTL3_CLOCK_CAR
+0x20871000 0x2087ffff
+- SYSTEM
+- GPIO_CTL4_CAR
+0x20880000 0x2088ffff
+- SYSTEM
+- GPIO_CTL4_RESET_CAR
+0x20880000 0x20880fff
+- SYSTEM
+- GPIO_CTL4_CLOCK_CAR
+0x20881000 0x2088ffff
+- SYSTEM
+- EQOS_CAR
+0x208a0000 0x208affff
+- SYSTEM
+- EQOS_RX_CAR
+0x208b0000 0x208bffff
+- SYSTEM
+- EMCB_CAR
+0x208c0000 0x208cffff
+- SYSTEM
+- EMCB_RESET_CAR
+0x208c0000 0x208c0fff
+- SYSTEM
+- EMCB_CLOCK_CAR
+0x208c1000 0x208cffff
+- SYSTEM
+- UFS_CAR
+0x208d0000 0x208dffff
+- SYSTEM
+- NVCSI_CAR
+0x208e0000 0x208effff
+- SYSTEM
+- I2C7_CAR
+0x208f0000 0x208fffff
+- SYSTEM
+- I2C9_CAR
+0x20900000 0x2090ffff
+- SYSTEM
+- NVDISPLAY4_CAR
+0x20910000 0x2091ffff
+- SYSTEM
+- PWM1_CAR
+0x20950000 0x2095ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- PWM2_CAR
+0x20960000 0x2096ffff
+- SYSTEM
+- PWM3_CAR
+0x20970000 0x2097ffff
+- SYSTEM
+- NVDISPLAY5_CAR
+0x20980000 0x2098ffff
+- SYSTEM
+- PWM5_CAR
+0x20990000 0x2099ffff
+- SYSTEM
+- PWM6_CAR
+0x209a0000 0x209affff
+- SYSTEM
+- PWM7_CAR
+0x209b0000 0x209bffff
+- SYSTEM
+- PWM8_CAR
+0x209c0000 0x209cffff
+- SYSTEM
+- UARTE_CAR
+0x209d0000 0x209dffff
+- SYSTEM
+- UARTF_CAR
+0x209e0000 0x209effff
+- SYSTEM
+- DBGAPB_CAR
+0x209f0000 0x209fffff
+- SYSTEM
+- BPMP_CAR
+0x20a00000 0x20aeffff
+- SYSTEM
+- BPMP_CPU_NIC_CAR
+0x20a10000 0x20a1ffff
+- SYSTEM
+- BPMP_APB_CAR
+0x20a20000 0x20a2ffff
+- SYSTEM
+- SOC_THERM_CAR
+0x20a30000 0x20a3ffff
+- SYSTEM
+- ACTMON_CAR
+0x20a40000 0x20a4ffff
+- SYSTEM
+- TSENSOR_CAR
+0x20a50000 0x20a5ffff
+- SYSTEM
+- BPMP_SEQ_CAR
+0x20a60000 0x20a6ffff
+- SYSTEM
+- AVFS_11_CAR
+0x20a70000 0x20a7ffff
+- SYSTEM
+- BPMP_SPARE
+0x20ae0000 0x20aeefff
+- SYSTEM
+- BPMP_SCR
+0x20aef000 0x20aeffff
+- SYSTEM
+- ERR_COLLATOR_BPMP_CAR
+0x20af0000 0x20afffff
+- SYSTEM
+- AON_CAR
+0x20b00000 0x20cdffff
+- SYSTEM
+- AON_CPU_NIC_CAR
+0x20b00000 0x20b0ffff
+- SYSTEM
+- CAN1_CAR
+0x20b10000 0x20b1ffff
+- SYSTEM
+- CAN2_CAR
+0x20b20000 0x20b2ffff
+- SYSTEM
+- AON_APB_CAR
+0x20b30000 0x20b3ffff
+- SYSTEM
+- UARTC_CAR
+0x20b40000 0x20b4ffff
+- SYSTEM
+- UARTG_CAR
+0x20b50000 0x20b5ffff
+- SYSTEM
+- AON_UART_FST_MIPI_CAL_C
+- AR
+0x20b60000 0x20b6ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- I2C2_CAR
+0x20b70000 0x20b7ffff
+- SYSTEM
+- I2C8_CAR
+0x20b80000 0x20b8ffff
+- SYSTEM
+- AON_I2C_SLOW_CAR
+0x20ba0000 0x20baffff
+- SYSTEM
+- SPI2_CAR
+0x20bb0000 0x20bbffff
+- SYSTEM
+- DMIC5_CAR
+0x20bc0000 0x20bcffff
+- SYSTEM
+- AON_TOUCH_CAR
+0x20bd0000 0x20bdffff
+- SYSTEM
+- PLLAON_CAR
+0x20be0000 0x20beffff
+- SYSTEM
+- OSC_CAR
+0x20bf0000 0x20bfffff
+- SYSTEM
+- PWM4_CAR
+0x20c00000 0x20c0ffff
+- SYSTEM
+- TSC_CAR
+0x20c10000 0x20c1ffff
+- SYSTEM
+- AON_MSS_CAR
+0x20c20000 0x20c2ffff
+- SYSTEM
+- AON_SEQ_CAR
+0x20c30000 0x20c3ffff
+- SYSTEM
+- UARTJ_CAR
+0x20c40000 0x20c4ffff
+- SYSTEM
+- VSOC_VMON_CAR
+0x20c50000 0x20c5ffff
+- SYSTEM
+- AON_SPARE
+0x20cb0000 0x20cdefff
+- SYSTEM
+- AON_SCR
+0x20cdf000 0x20cdffff
+- SYSTEM
+- VREFRO_SYS_CAR
+0x20ce0000 0x20ceffff
+- SYSTEM
+- ERR_COLLATOR_AON_CAR
+0x20cf0000 0x20cfffff
+- SYSTEM
+- SCE_CAR
+0x20d00000 0x20deffff
+- SYSTEM
+- SCE_CPU_NIC_CAR
+0x20d00000 0x20d0ffff
+- SYSTEM
+- SCE_SEQ_CAR
+0x20d20000 0x20d2ffff
+- SYSTEM
+- AVFS_12_CAR
+0x20d30000 0x20d3ffff
+- SYSTEM
+- SCE_SPARE_SCR_CAR
+0x20de0000 0x20deffff
+- SYSTEM
+- ERR_COLLATOR_SCE_CAR
+0x20df0000 0x20dfffff
+- SYSTEM
+- AVFS_2_CAR
+0x20e10000 0x20e1ffff
+- SYSTEM
+- AVFS_3_CAR
+0x20e20000 0x20e2ffff
+- SYSTEM
+- AVFS_4_CAR
+0x20e30000 0x20e3ffff
+- SYSTEM
+- AVFS_6_CAR
+0x20e50000 0x20e5ffff
+- SYSTEM
+- AVFS_7_CAR
+0x20e60000 0x20e6ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- AVFS_8_CAR
+0x20e70000 0x20e7ffff
+- SYSTEM
+- AVFS_9_CAR
+0x20e80000 0x20e8ffff
+- SYSTEM
+- AVFS_10_CAR
+0x20e90000 0x20e9ffff
+- SYSTEM
+- AVFS_14_CAR
+0x20ed0000 0x20edffff
+- SYSTEM
+- AVFS_15_CAR
+0x20ee0000 0x20eeffff
+- SYSTEM
+- AVFS_16_CAR
+0x20ef0000 0x20efffff
+- SYSTEM
+- AVFS_17_CAR
+0x20f00000 0x20f0ffff
+- SYSTEM
+- AVFS_21_CAR
+0x20f40000 0x20f4ffff
+- SYSTEM
+- GPIO_CTL5_CAR
+0x20fc0000 0x20fcffff
+- SYSTEM
+- GPIO_CTL5_RESET_CAR
+0x20fc0000 0x20fc0fff
+- SYSTEM
+- GPIO_CTL5_CLOCK_CAR
+0x20fc1000 0x20fcffff
+- SYSTEM
+- EMCC_CAR
+0x20fd0000 0x20fdffff
+- SYSTEM
+- EMCC_RESET_CAR
+0x20fd0000 0x20fd0fff
+- SYSTEM
+- EMCC_CLOCK_CAR
+0x20fd1000 0x20fdffff
+- SYSTEM
+- EMCD_CAR
+0x20fe0000 0x20feffff
+- SYSTEM
+- EMCD_RESET_CAR
+0x20fe0000 0x20fe0fff
+- SYSTEM
+- EMCD_CLOCK_CAR
+0x20fe1000 0x20feffff
+- SYSTEM
+- ADC_CAR
+0x20ff0000 0x20ffffff
+- SYSTEM
+- RCE_CAR
+0x21000000 0x210effff
+- SYSTEM
+- RCE_CPU_NIC_CAR
+0x21000000 0x2100ffff
+- SYSTEM
+- RCE_SEQ_CAR
+0x21020000 0x2102ffff
+- SYSTEM
+- AVFS_19_CAR
+0x21030000 0x2103ffff
+- SYSTEM
+- RCE_SPARE_CAR
+0x21040000 0x2104ffff
+- SYSTEM
+- RCE_SCR_CAR
+0x210e0000 0x210effff
+- SYSTEM
+- ERR_COLLATOR_RCE_CAR
+0x210f0000 0x210fffff
+- SYSTEM
+- OSC_SOC_CAR
+0x21100000 0x2110ffff
+- SYSTEM
+- QSPI1_CAR
+0x21110000 0x2111ffff
+- SYSTEM
+- IST_CAR
+0x21120000 0x2112ffff
+- SYSTEM
+- DLA0_CAR
+0x21130000 0x2113ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- DLA1_CAR
+0x21140000 0x2114ffff
+- SYSTEM
+- PVA0_CAR
+0x21150000 0x2115ffff
+- SYSTEM
+- ADC_CV_CAR
+0x21180000 0x2118ffff
+- SYSTEM
+- CV_SOC_CAR
+0x21190000 0x2119ffff
+- SYSTEM
+- NVHS_UPHY_CAR
+0x211b0000 0x211bffff
+- SYSTEM
+- HSIO_UPHY_CAR
+0x211c0000 0x211cffff
+- SYSTEM
+- PEX0_CAR
+0x211d0000 0x211dffff
+- SYSTEM
+- PEX1_CAR
+0x211e0000 0x211effff
+- SYSTEM
+- PLLNVHS_CAR
+0x211f0000 0x211fffff
+- SYSTEM
+- UARTI_CAR
+0x21200000 0x2120ffff
+- SYSTEM
+- I2S7_CAR
+0x21210000 0x2121ffff
+- SYSTEM
+- I2S8_CAR
+0x21220000 0x2122ffff
+- SYSTEM
+- GBE0_CAR
+0x21240000 0x2124ffff
+- SYSTEM
+- UARTH_CAR
+0x21280000 0x2128ffff
+- SYSTEM
+- PLLCV_CAR
+0x212a0000 0x212affff
+- SYSTEM
+- PLLCV3_CAR
+0x212c0000 0x212cffff
+- SYSTEM
+- EMCCOM_CAR
+0x212d0000 0x212dffff
+- SYSTEM
+- EMCCOM_RESET_CAR
+0x212d0000 0x212d0fff
+- SYSTEM
+- EMCCOM_CLOCK_CAR
+0x212d1000 0x212dffff
+- SYSTEM
+- SPI5_CAR
+0x212e0000 0x212effff
+- SYSTEM
+- TACH0_CAR
+0x212f0000 0x212fffff
+- SYSTEM
+- TACH1_CAR
+0x21300000 0x2130ffff
+- SYSTEM
+- OFA_CAR
+0x21320000 0x2132ffff
+- SYSTEM
+- PLLHUB_CAR
+0x21330000 0x2133ffff
+- SYSTEM
+- PLLCV4_CAR
+0x21340000 0x2134ffff
+- SYSTEM
+- PLLGBE_CAR
+0x21350000 0x2135ffff
+- SYSTEM
+- AVFS_26_CAR
+0x21380000 0x2138ffff
+- SYSTEM
+- AVFS_27_CAR
+0x21390000 0x2139ffff
+- SYSTEM
+- AVFS_28_CAR
+0x213a0000 0x213affff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- AVFS_29_CAR
+0x213b0000 0x213bffff
+- SYSTEM
+- ADC_CV2_CAR
+0x213d0000 0x213dffff
+- SYSTEM
+- ADC_CV3_CAR
+0x213e0000 0x213effff
+- SYSTEM
+- VPLL0_CAR
+0x213f0000 0x213fffff
+- SYSTEM
+- VPLL1_CAR
+0x21400000 0x2140ffff
+- SYSTEM
+- SPPLL0_CAR
+0x21430000 0x2143ffff
+- SYSTEM
+- SPPLL1_CAR
+0x21440000 0x2144ffff
+- SYSTEM
+- DISPPLL_CAR
+0x21450000 0x2145ffff
+- SYSTEM
+- GBE_UPHY_CAR
+0x21460000 0x2146ffff
+- SYSTEM
+- PEX2_CAR
+0x21470000 0x2147ffff
+- SYSTEM
+- TSENSE_CAR
+0x21480000 0x2148ffff
+- SYSTEM
+- SEU1_CAR
+0x21490000 0x2149ffff
+- SYSTEM
+- HSSTP_CAR
+0x214b0000 0x214bffff
+- SYSTEM
+- NVJPG1_CAR
+0x214d0000 0x214dffff
+- SYSTEM
+- AVFS_30_CAR
+0x21510000 0x2151ffff
+- SYSTEM
+- DISPHUBPLL_CAR
+0x21550000 0x2155ffff
+- SYSTEM
+- DSIPLL_CAR
+0x21560000 0x2156ffff
+- SYSTEM
+- PKA_CAR
+0x21570000 0x2157ffff
+- SYSTEM
+- DCE_CAR
+0x21700000 0x217effff
+- SYSTEM
+- DCE_CPU_NIC_CAR
+0x21700000 0x2170ffff
+- SYSTEM
+- DCE_SEQUENCER_CAR
+0x21720000 0x2172ffff
+- SYSTEM
+- AVFS_23_CAR
+0x21730000 0x2173ffff
+- SYSTEM
+- ERR_COLLATOR_DCE_CAR
+0x217f0000 0x217fffff
+- SYSTEM
+- ERR_COLLATOR_CAR
+0x21800000 0x21dfffff
+- SYSTEM
+- ERR_COLLATOR_4_CAR
+0x21840000 0x2184ffff
+- SYSTEM
+- ERR_COLLATOR_5_CAR
+0x21850000 0x2185ffff
+- SYSTEM
+- ERR_COLLATOR_6_CAR
+0x21860000 0x2186ffff
+- SYSTEM
+- ERR_COLLATOR_7_CAR
+0x21870000 0x2187ffff
+- SYSTEM
+- ERR_COLLATOR_8_CAR
+0x21880000 0x2188ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- ERR_COLLATOR_9_CAR
+0x21890000 0x2189ffff
+- SYSTEM
+- ERR_COLLATOR_10_CAR
+0x218a0000 0x218affff
+- SYSTEM
+- ERR_COLLATOR_11_CAR
+0x218b0000 0x218bffff
+- SYSTEM
+- ERR_COLLATOR_12_CAR
+0x218c0000 0x218cffff
+- SYSTEM
+- ERR_COLLATOR_13_CAR
+0x218d0000 0x218dffff
+- SYSTEM
+- ERR_COLLATOR_14_CAR
+0x218e0000 0x218effff
+- SYSTEM
+- ERR_COLLATOR_15_CAR
+0x218f0000 0x218fffff
+- SYSTEM
+- ERR_COLLATOR_16_CAR
+0x21900000 0x2190ffff
+- SYSTEM
+- ERR_COLLATOR_17_CAR
+0x21910000 0x2191ffff
+- SYSTEM
+- ERR_COLLATOR_18_CAR
+0x21920000 0x2192ffff
+- SYSTEM
+- ERR_COLLATOR_19_CAR
+0x21930000 0x2193ffff
+- SYSTEM
+- ERR_COLLATOR_20_CAR
+0x21940000 0x2194ffff
+- SYSTEM
+- ERR_COLLATOR_21_CAR
+0x21950000 0x2195ffff
+- SYSTEM
+- ERR_COLLATOR_22_CAR
+0x21960000 0x2196ffff
+- SYSTEM
+- ERR_COLLATOR_23_CAR
+0x21970000 0x2197ffff
+- SYSTEM
+- ERR_COLLATOR_24_CAR
+0x21980000 0x2198ffff
+- SYSTEM
+- ERR_COLLATOR_25_CAR
+0x21990000 0x2199ffff
+- SYSTEM
+- ERR_COLLATOR_26_CAR
+0x219a0000 0x219affff
+- SYSTEM
+- ERR_COLLATOR_27_CAR
+0x219b0000 0x219bffff
+- SYSTEM
+- ERR_COLLATOR_28_CAR
+0x219c0000 0x219cffff
+- SYSTEM
+- ERR_COLLATOR_29_CAR
+0x219d0000 0x219dffff
+- SYSTEM
+- ERR_COLLATOR_30_CAR
+0x219e0000 0x219effff
+- SYSTEM
+- ERR_COLLATOR_31_CAR
+0x219f0000 0x219fffff
+- SYSTEM
+- ERR_COLLATOR_32_CAR
+0x21a00000 0x21a0ffff
+- SYSTEM
+- ERR_COLLATOR_33_CAR
+0x21a10000 0x21a1ffff
+- SYSTEM
+- ERR_COLLATOR_34_CAR
+0x21a20000 0x21a2ffff
+- SYSTEM
+- ERR_COLLATOR_35_CAR
+0x21a30000 0x21a3ffff
+- SYSTEM
+- ERR_COLLATOR_36_CAR
+0x21a40000 0x21a4ffff
+- SYSTEM
+- ERR_COLLATOR_37_CAR
+0x21a50000 0x21a5ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- ERR_COLLATOR_38_CAR
+0x21a60000 0x21a6ffff
+- SYSTEM
+- ERR_COLLATOR_39_CAR
+0x21a70000 0x21a7ffff
+- SYSTEM
+- ERR_COLLATOR_40_CAR
+0x21a80000 0x21a8ffff
+- SYSTEM
+- ERR_COLLATOR_41_CAR
+0x21a90000 0x21a9ffff
+- SYSTEM
+- ERR_COLLATOR_42_CAR
+0x21aa0000 0x21aaffff
+- SYSTEM
+- ERR_COLLATOR_43_CAR
+0x21ab0000 0x21abffff
+- SYSTEM
+- ERR_COLLATOR_44_CAR
+0x21ac0000 0x21acffff
+- SYSTEM
+- ERR_COLLATOR_45_CAR
+0x21ad0000 0x21adffff
+- SYSTEM
+- ERR_COLLATOR_46_CAR
+0x21ae0000 0x21aeffff
+- SYSTEM
+- FSI_CAR
+0x21e00000 0x21feffff
+- SYSTEM
+- ERR_COLLATOR_FSI_CAR
+0x21ff0000 0x21ffffff
+- SYSTEM
+- CSITE
+0x24000000 0x27ffffff
+- SYSTEM
+- CSITE_MISC0
+0x24000000 0x2401ffff
+- SYSTEM
+- CSITE_CFG
+0x24020000 0x2403ffff
+- SYSTEM
+- CSITE_MISC1
+0x24040000 0x2440ffff
+- SYSTEM
+- LA
+0x24410000 0x2441ffff
+- SYSTEM
+- CSITE_MISC2
+0x24420000 0x2443ffff
+- SYSTEM
+- CSITE_BPMP
+0x24440000 0x2445ffff
+- SYSTEM
+- CSITE_MISC3
+0x24480000 0x2473ffff
+- SYSTEM
+- CSITE_PVA0VPU
+0x24740000 0x2477ffff
+- SYSTEM
+- CSITE_MISC4
+0x24780000 0x247fffff
+- SYSTEM
+- CSITE_FSI
+0x24800000 0x24ffffff
+- SYSTEM
+- STM
+0x25000000 0x25ffffff
+- SYSTEM
+- CSITE_CCPLEX
+0x26000000 0x27ffffff
+- SYSTEM
+- PCIE_32BIT
+0x28000000 0x3fffffff
+- SYSTEM
+- PCIE_C7_32BIT
+0x28000000 0x29ffffff
+- SYSTEM
+- PCIE_C7_32BIT_EP
+0x28000000 0x28001fff
+- SYSTEM_CFG.PCIE_C7_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.END_P
+- OINT
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- PCIE_C7_32BIT_RP
+0x28000000 0x28001fff
+- SYSTEM_CFG.PCIE_C7_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.ROOT_
+- PORT
+- PCIE_C7_32BIT_DMA
+0x28040000 0x2807ffff
+- SYSTEM
+- PCIE_C8_32BIT
+0x2a000000 0x2bffffff
+- SYSTEM
+- PCIE_C8_32BIT_EP
+0x2a000000 0x2a001fff
+- SYSTEM_CFG.PCIE_C8_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.END_P
+- OINT
+- PCIE_C8_32BIT_RP
+0x2a000000 0x2a001fff
+- SYSTEM_CFG.PCIE_C8_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.ROOT_
+- PORT
+- PCIE_C8_32BIT_DMA
+0x2a040000 0x2a07ffff
+- SYSTEM
+- PCIE_C9_32BIT
+0x2c000000 0x2dffffff
+- SYSTEM
+- PCIE_C9_32BIT_EP
+0x2c000000 0x2c001fff
+- SYSTEM_CFG.PCIE_C9_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.END_P
+- OINT
+- PCIE_C9_32BIT_RP
+0x2c000000 0x2c001fff
+- SYSTEM_CFG.PCIE_C9_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.ROOT_
+- PORT
+- PCIE_C9_32BIT_DMA
+0x2c040000 0x2c07ffff
+- SYSTEM
+- PCIE_C10_32BIT
+0x2e000000 0x2fffffff
+- SYSTEM
+- PCIE_C10_32BIT_EP
+0x2e000000 0x2e001fff
+- SYSTEM_CFG.PCIE_C10_CTL.PCIE_RP_
+- APPL_DM_TYPE_0.DEVICE_TYPE.END_
+- POINT
+- PCIE_C10_32BIT_RP
+0x2e000000 0x2e001fff
+- SYSTEM_CFG.PCIE_C10_CTL.PCIE_RP_
+- APPL_DM_TYPE_0.DEVICE_TYPE.ROOT
+_PORT
+- PCIE_C10_32BIT_DMA
+0x2e040000 0x2e07ffff
+- SYSTEM
+- PCIE_C1_32BIT
+0x30000000 0x31ffffff
+- SYSTEM
+- PCIE_C1_32BIT_RP
+0x30000000 0x30001fff
+- SYSTEM
+- PCIE_C1_32BIT_DMA
+0x30040000 0x3007ffff
+- SYSTEM
+- PCIE_C2_32BIT
+0x32000000 0x33ffffff
+- SYSTEM
+- PCIE_C2_32BIT_RP
+0x32000000 0x32001fff
+- SYSTEM
+- PCIE_C2_32BIT_DMA
+0x32040000 0x3207ffff
+- SYSTEM
+- PCIE_C3_32BIT
+0x34000000 0x35ffffff
+- SYSTEM
+- PCIE_C3_32BIT_RP
+0x34000000 0x34001fff
+- SYSTEM
+- PCIE_C3_32BIT_DMA
+0x34040000 0x3407ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- PCIE_C4_32BIT
+0x36000000 0x37ffffff
+- SYSTEM
+- PCIE_C4_32BIT_EP
+0x36000000 0x36001fff
+- SYSTEM_CFG.PCIE_C4_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.END_P
+- OINT
+- PCIE_C4_32BIT_RP
+0x36000000 0x36001fff
+- SYSTEM_CFG.PCIE_C4_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.ROOT_
+- PORT
+- PCIE_C4_32BIT_DMA
+0x36040000 0x3607ffff
+- SYSTEM
+- PCIE_C0_32BIT
+0x38000000 0x39ffffff
+- SYSTEM
+- PCIE_C0_32BIT_EP
+0x38000000 0x38001fff
+- SYSTEM_CFG.PCIE_C0_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.END_P
+- OINT
+- PCIE_C0_32BIT_RP
+0x38000000 0x38001fff
+- SYSTEM_CFG.PCIE_C0_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.ROOT_
+- PORT
+- PCIE_C0_32BIT_DMA
+0x38040000 0x3807ffff
+- SYSTEM
+- PCIE_C5_32BIT
+0x3a000000 0x3bffffff
+- SYSTEM
+- PCIE_C5_32BIT_EP
+0x3a000000 0x3a001fff
+- SYSTEM_CFG.PCIE_C5_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.END_P
+- OINT
+- PCIE_C5_32BIT_RP
+0x3a000000 0x3a001fff
+- SYSTEM_CFG.PCIE_C5_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.ROOT_
+- PORT
+- PCIE_C5_32BIT_DMA
+0x3a040000 0x3a07ffff
+- SYSTEM
+- PCIE_C6_32BIT
+0x3c000000 0x3dffffff
+- SYSTEM
+- PCIE_C6_32BIT_EP
+0x3c000000 0x3c001fff
+- SYSTEM_CFG.PCIE_C6_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.END_P
+- OINT
+- PCIE_C6_32BIT_RP
+0x3c000000 0x3c001fff
+- SYSTEM_CFG.PCIE_C6_CTL.PCIE_RP_A
+- PPL_DM_TYPE_0.DEVICE_TYPE.ROOT_
+- PORT
+- PCIE_C6_32BIT_DMA
+0x3c040000 0x3c07ffff
+- SYSTEM
+- APE_ARAM
+0x3f800000 0x3fffffff
+- APE
+- ON_CHIP_DATA
+0x40000000 0x7fffffff
+- SYSTEM
+- SYSRAM_0
+0x40000000 0x4fffffff
+- SYSTEM
+- SYSRAM_0_IMPL
+0x40000000 0x4007ffff
+- SYSTEM
+- AON_TZRAM
+0x50000000 0x5007ffff
+- SYSTEM
+- FSI_SRAM
+0x51000000 0x512fffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- FSI_SRAM0
+0x51000000 0x5107ffff
+- SYSTEM
+- FSI_SRAM1
+0x51080000 0x510fffff
+- SYSTEM
+- FSI_SRAM2
+0x51100000 0x5117ffff
+- SYSTEM
+- FSI_SRAM3
+0x51180000 0x511fffff
+- SYSTEM
+- FSI_SRAM4
+0x51200000 0x5127ffff
+- SYSTEM
+- FSI_SRAM5
+0x51280000 0x512fffff
+- SYSTEM
+- GIC_MSI
+0x54000000 0x57ffffff
+- SYSTEM
+- FSI_TCM_EXT
+0x58000000 0x58ffffff
+- SYSTEM
+- FSI_CPU0_TCM_EXT
+0x58000000 0x583fffff
+- SYSTEM
+- FSI_CPU0_ATCM_EXT
+0x58000000 0x5803ffff
+- SYSTEM
+- FSI_CPU0_BTCM
+0x58100000 0x5811ffff
+- SYSTEM
+- FSI_CPU0_BTCM_EXT
+0x58100000 0x5811ffff
+- SYSTEM
+- FSI_CPU0_CTCM
+0x58200000 0x5821ffff
+- SYSTEM
+- FSI_CPU0_CTCM_EXT
+0x58200000 0x5821ffff
+- SYSTEM
+- FSI_CPU1_TCM_EXT
+0x58400000 0x587fffff
+- SYSTEM
+- FSI_CPU1_ATCM_EXT
+0x58400000 0x5843ffff
+- SYSTEM
+- FSI_CPU1_BTCM
+0x58500000 0x5851ffff
+- SYSTEM
+- FSI_CPU1_BTCM_EXT
+0x58500000 0x5851ffff
+- SYSTEM
+- FSI_CPU1_CTCM
+0x58600000 0x5861ffff
+- SYSTEM
+- FSI_CPU1_CTCM_EXT
+0x58600000 0x5861ffff
+- SYSTEM
+- FSI_CPU2_TCM_EXT
+0x58800000 0x58bfffff
+- SYSTEM
+- FSI_CPU2_ATCM_EXT
+0x58800000 0x5883ffff
+- SYSTEM
+- FSI_CPU2_BTCM
+0x58900000 0x5891ffff
+- SYSTEM
+- FSI_CPU2_BTCM_EXT
+0x58900000 0x5891ffff
+- SYSTEM
+- FSI_CPU2_CTCM
+0x58a00000 0x58a1ffff
+- SYSTEM
+- FSI_CPU2_CTCM_EXT
+0x58a00000 0x58a1ffff
+- SYSTEM
+- FSI_CPU3_TCM_EXT
+0x58c00000 0x58ffffff
+- SYSTEM
+- FSI_CPU3_ATCM_EXT
+0x58c00000 0x58c3ffff
+- SYSTEM
+- FSI_CPU3_BTCM
+0x58d00000 0x58d1ffff
+- SYSTEM
+
+- System Address Map
+- Block Name
+- Address Start
+- Address End
+- Address Locality
+- FSI_CPU3_BTCM_EXT
+0x58d00000 0x58d1ffff
+- SYSTEM
+- FSI_CPU3_CTCM
+0x58e00000 0x58e1ffff
+- SYSTEM
+- FSI_CPU3_CTCM_EXT
+0x58e00000 0x58e1ffff
+- SYSTEM
+- FSI_CHSM_TCM_EXT
+0x59000000 0x590fffff
+- SYSTEM
+- FSI_CHSM_ATCM_EXT
+0x59000000 0x5907ffff
+- SYSTEM
+- FSI_CHSM_ATCM_RAM_EXT
+0x59040000 0x5907ffff
+- SYSTEM
+- FSI_CHSM_BTCM
+0x59080000 0x590bffff
+- SYSTEM
+- FSI_CHSM_BTCM_EXT
+0x59080000 0x590bffff
+- SYSTEM
+- SYNCPOINT_0
+0x60000000 0x63ffffff
+- SYSTEM
+- DRAM
+0x80000000 0x207fffffff
+- SYSTEM
+- EMEM
+0x80000000 0x207fffffff
+- SYSTEM
+- EMEM_32BIT
+0x80000000 0xffffffff
+- SYSTEM
+- PCIE_64BIT
+0x2080000000 0x3fffffffff
+- SYSTEM
+- PCIE_C1_64BIT
+0x2080000000 0x20bfffffff
+- SYSTEM
+- PCIE_C2_64BIT
+0x20c0000000 0x20ffffffff
+- SYSTEM
+- PCIE_C3_64BIT
+0x2100000000 0x213fffffff
+- SYSTEM
+- PCIE_C6_64BIT
+0x2140000000 0x217fffffff
+- SYSTEM
+- PCIE_C7_64BIT
+0x2180000000 0x21bfffffff
+- SYSTEM
+- PCIE_C8_64BIT
+0x21c0000000 0x21ffffffff
+- SYSTEM
+- PCIE_C9_64BIT
+0x2200000000 0x223fffffff
+- SYSTEM
+- PCIE_C10_64BIT
+0x2240000000 0x227fffffff
+- SYSTEM
+- PCIE_C4_64BIT
+0x2280000000 0x267fffffff
+- SYSTEM
+- PCIE_C0_64BIT
+0x2680000000 0x2a7fffffff
+- SYSTEM
+- PCIE_C5_64BIT
+0x2a80000000 0x2e7fffffff
+- SYSTEM
+- MSSNVLINK_SLAVE
+0x4000000000 0xffbfffffff
+- SYSTEM
+- MSSNVLINK0_SLAVE
+0x4000000000 0x7fffffffff
+- SYSTEM
+- MSSNVLINK1_SLAVE
+0x8000000000 0xbfffffffff
+- SYSTEM
+
+- Address Space Translation (AST)
+## 3.3 Address Space Translation (AST)
+### 3.3.1 Overview
+- The Address Space Translation (AST) converts local AXI physical addresses of the embedded
+Cortex-R5 and Cortex-A9 processor cores to either virtual or physical Memory Controller (MC) addresses. The AST also adds MC-specific attributes to each address range. A processor may need to use both virtual and physical addresses if it has a dedicated portion of system DRAM that is not visible to the Operating System (OS), and is protected from access by other blocks in the SoC. Accesses to the dedicated region of DRAM must be sent to the MC as physical addresses, and must bypass the System Memory Management Unit (SMMU). If that same processor uses virtual addresses provided by a driver to DMA data, them the processor must support sending both physical and virtual addresses to the MC. The figure below shows a simple address map illustrating address space conflicts that the AST is designed to help resolve. In this example, the OS uses a shared page table for the CPU MMU and SMMU. The Virtual address used for the shared buffer would collide with the BPMP Timer address. The BPMP uses the AST to relocate the buffer in its local address space, but still generates the correct virtual address to the SMMU. This document describes an implementation where the mapping of protected physical regions is handled by boot code during initialization and is completely transparent to the OS.
+
+- Address Space Translation (AST)
+**Figure 3.9 Address Space Conflict Example**
+#### 3.3.1.1 Features
+The AST block provides the following function: A set of regions that provide a mapping from the local AXI address space to the MC address space. Each region consists of:
+- The base address and size of the local region
+- The base address of the MC region
+- Snoop attribute (if routed to SCF)
+- Address space ID (StreamID)
+- AXI Master and Slave interfaces
+- APB Configuration Register block
+- Per region access controls
+- Per region lock controls
+- Global Translation attribute lock
+- Error Detection
+- Configurable behavior for requests that do not match a region or do not have the right
+protection attributes (TrustZone® or security group):
+
+- Address Space Translation (AST)
+- - either pass-through unchanged with a default set of attributes, or return a DECERR response
+### 3.3.2 Functional Description
+- During normal operation the AST block functions as an AXI pipeline with internal address
+translation. Each pipeline stage captures information from the previous stage using the AXI read/ valid protocol.
+**Figure 3.10 AST Block Diagram**
+
+- Address Space Translation (AST)
+#### 3.3.2.1 Address Generation Blocks
+The address generation blocks are responsible for address translation and attribute insertion. AST supports eight regions (address generation blocks) in each path (write and read data paths) using which it can translate minimum of eight address ranges. Each region consists of SLAVE_BASE, MASTER_BASE, MASK, and CONTROL registers to facilitate address translation.
+#### 3.3.2.2 Read Error Response
+When a match error is detected, the read error control block generates a DECERR response for each required data beat. Read error responses can only be pushed into the FIFO if the master read response interface is idle. The read error control block also generates DECERR responses if the block signal is asserted.
+#### 3.3.2.3 Write Error Response
+When a match error is detected, the write error control block generates a DECERR response. The write error control block also matches the AWID of the discarded transaction to discard the corresponding data on the WDATA channel. The write error control block also generates DECERR responses when the block signal is asserted. Since Cortex-R5 processors can send write data before the write address, the write data channel is stalled by the write error control block until the write address check occurs if data arrives before the address.
+#### 3.3.2.4 Decode Error Generation
+The AST is responsible for generating a decode error response in the following cases: A request matches multiple regions. A request does not match a region and AST_CONTROL[MatchErrCtl] is set.
+- The VMIndx for the request points to an AST_STREAMID_CTL register where the enable bit is
+not set. The ast_block input is asserted. If a decode error is generated, the AST logs the address of the request in the error log registers.
+
+- Address Space Translation (AST)
+#### 3.3.2.5 Clocks and Resets
+##### 3.3.2.5.1 Clock Requirements
+AST has two clock ports: ast_pclk and ast_core_clk. 1. 2. ast_pclk: Clocks the APB interface and the APB slave plugin ast_core_clk: Clocks the input/output AXI interfaces, core logic, and configuration registers
+#### 3.3.2.6 AST Software Requirements
+##### 3.3.2.6.1 Requirements for Changing an AST Region Mapping
+1. If the region is cacheable in a local cache, any cache lines with an address in the region must be flushed before changing the address map.
+- Before changing the mapping of an AST region all pending transactions to that region must
+be completed. 2.
+#### 3.3.2.7 Programming Examples
+To remap a region of local memory space using the AST the Region Save Base, Region Mask, and Region master base register must be programmed correctly.
+##### 3.3.2.7.1 32-bit Input Address and 32-bit Output Addresses
+- The following shows an example of how to program the AST region 0 to map the 64 KB local
+address region between 0x8000_0000 and 0x8000_FFFF to the system address region between 0x4FFF_0000 and 0x4FFF_FFFF.
+- AST_REGION_0_MASTER_BASE_LO = 0x4FFF_0000
+- AST_REGION_0_MASTER_BASE_HI = 0x0000_0000
+- AST_REGION_0_MASK_LO = 0x0000_F000
+- Setting bits 15-12 of the mask
+- - -
+- Defines the region as 64K
+- Defines a region match as address bits 31-16 equal to 0x8000
+- Define the output address as 0x4FFF_XXXX where XXXX is the value of the input address
+- AST_REGION_0_MASK_HI = 0x0000_0000
+- AST_REGION_0_SLAVE_BASE_HI = 0x0000_0000
+- AST_REGION_0_SLAVE_BASE_LO = 0x8000_0001 (the LSB of
+- AST_REGION_0_SLAVE_BASE_LO is the region enable bit, hence this bit needs to be
+configured at last).
+
+- Address Space Translation (AST)
+- In this example, an input address of 0x8000_1000 would generate an output address of
+0x4FFF_1000.
+##### 3.3.2.7.2 32-bit Input Address and 40-bit Output Address
+The following shows an example of how to program the AST region 0 to map the 1 MB local address region between 0x4000_0000 and 0x400F_FFFF to the system address region between 0x03_C000_0000 and 0x03_C00F_FFFF.
+- AST_REGION_0_MASTER_BASE_LO = 0xC000_0000
+- AST_REGION_0_MASTER_BASE_HI = 0x0000_0003
+- AST_REGION_0_MASK_LO = 0x000F_F000
+- Setting bits 19-12 of the mask
+- Defines the region as 1MB
+- Defines a region match as address bits 31-20 equal to 0x400
+- Define the output address as 0x03_C00X_XXXX where X_XXXX is the value of the input
+address - - -
+- AST_REGION_0_MASK_HI = 0x0000_0000
+- AST_REGION_0_SLAVE_BASE_HI = 0x0000_0000
+- AST_REGION_0_SLAVE_BASE_LO = 0x4000_0001 (the LSB of
+- AST_REGION_0_SLAVE_BASE_LO is the region enable bit, hence this bit needs to be
+configured at last).
+- In this example, an input address of 0x4006_1000 would generate an output address of
+0x03_C006_1000.
+### 3.3.3 Programming Guidelines
+The following programming guidelines must be followed to ensure proper operation of the AST. The region mask must be programed to specify a power of two aligned regions. The region slave and master addresses must be aligned to the region size.
+- Software must ensure that AST_REGION_SLAVE_BASE_LO[Enable] is 0 before programming
+any of the region registers.
+#### 3.3.3.1 Steps to Configure Region #i in AST
+Program the following register fields to select the address range that need to be translated. 1.
+- AST_REGION_<i>_SLAVE_BASE_LO. SlvBase
+- AST_REGION_<i>_SLAVE_BASE_HI. SlvBase
+- AST_REGION_<i>_MASK_LO. Mask
+- AST_REGION_<i>_MASK _HI. Mask
+a. b. c. d.
+
+- AST Registers
+2. Program the following register fields for the desired output (translated) address. a. b.
+- AST_REGION_<i>_MASTER_BASE _LO. MastBase
+- AST_REGION_<i>_MASTER_BASE _HI. MastBase
+3. If an AXI transaction must bypass SMMU (physical address), program. a.
+- APS_AST_REGION_<i>_CONTROL_0. Physical = 1
+4.
+- If the AXI transaction must go through SMMU, select the appropriate stream id by
+programming the following fields. a. b. APS_AST_REGION_<i>_CONTROL_0. Physical = 0. APS_AST_REGION_<i>_CONTROL_0. VMIndex field. APS_AST_STREAMID_CTL_0[VMIndex]. StreamID field. APS_AST_STREAMID_CTL_0[VMIndex]. Enable = 1.
+- Note: APS_AST_STREAMID_CTL_0[0:15] registers are typically programmed by the
+Hypervisor. c. d. 5.
+- Program the following fields in APS_AST_REGION_<i>_CONTROL_0 register to select the valid
+memory attributes. a. b.
+- APS_AST_REGION_<i>_CONTROL_0. CarveOutID
+- APS_AST_REGION_<i>_CONTROL_0. Snoop
+6. Enable the region by setting AST_REGION_<i>_SLAVE_BASE.Enable register bit to 1.
+### 3.3.4 AST Registers
+Refer to "Reading Register Tables" in the Introduction chapter for the register table protocol as well as recommendations for accessing registers.
+- There are 17 instances of the AST registers in the following modules as shown in the table
+below. The register descriptions in this section provide the offset of each register with base addresses listed in the table.
+- Module
+- Instance Name
+- Base Address
+- Always ON Cluster (AON) and SPE
+- AON_AST_0
+0x0c040000
+- AON_AST_1
+0x0c050000
+- Audio Processing Engine (APE)
+- APE_ACAST
+0x02994000
+- APE_ADAST
+0x02996000
+- Boot and Power Management Processor (BPMP)
+- BPMP_AST_0
+0x0d040000
+- BPMP_AST_1
+0x0d050000
+- Real-time Camera Engine (RCE)
+- RCE_AST_0
+0x0b840000
+- RCE_AST_1
+0x0b850000
+
+- AST Registers
+- Module
+- Instance Name
+- Base Address
+- Safety Cluster Engine (SCE)
+- SCE_AST_0
+0x0b040000
+- SCE_AST_1
+0x0b050000
+- Display Cluster Engine (DCE)
+- DCE_AST_0
+0x0d840000
+- DCE_AST_1
+0x0d850000
+- Functional Safety Island (FSI)
+- FSI_CHSM_AST
+0x092d0000
+- FSI_CPU0_AST
+0x09280000
+- FSI_CPU1_AST
+0x09290000
+- FSI_CPU2_AST
+0x092a0000
+- FSI_CPU3_AST
+0x092b0000 R/W Attribute
+- Definition
+- RO
+- Read-only
+- RW
+- Read-write
+- RW1
+- Read-write one only: Once set this bit can only be cleared by a system reset
+- RWCL
+Read-write-Carveout-Lock:
+- Read-only (and can only be reset by a system reset) if
+(AST_CONTROL[CarveOutLock] == 1)
+- Read-write if (AST_CONTROL[CarveOutLock] == 0)
+- RWGL
+Read-write-Global-Lock:
+- Read-only (and can only be reset by a system reset) if
+(AST_CONTROL[Lock] == 1)
+- Read-write if AST_CONTROL[Lock] == 0
+- RWGL_Region
+- Read-only (and can only be reset by a system reset) if (AST_CONTROL[Lock]
+== 1 || AST_REGION_*_CONTROL[Lock] == 1) *
+- Read-write if (AST_CONTROL[Lock] == 0 && AST_REGION_*_CONTROL[Lock]
+== 0)
+- RWRL
+Read-write-Region-Lock:
+- Read-only (and can only be reset by a system reset) if
+(AST_REGION_CONTROL[RegionNum][Lock] == 1)
+- Read-write if (AST_REGION_CONTROL[RegionNum][Lock] == 0)
+- APS_AST_CONTROL_0
+- Offset: 0x0
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- AST Registers
+- SCR Protection: APS_AST_SCR_AST_GBL_SEC_CONTROL_0
+- Reset: 0x1fc80000 (0b0001,1111,11x0,1000,0xxx,xx00,000x,x000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RW
+0x0 ApbOvrOn: APB Clock Override: Set to 1 to force APB clock always on in AST. 1 = APB SLCG is disabled
+- RW
+0x0 NicOvrOn: NIC Clock Override: Set to 1 to force NIC clock always on in AST. 1 = NIC SLCG is disabled
+- RW1
+0x0 CarveOutLock: Carveout Lock.
+- This bit prevents writes to all Carve Out controls
+when set to 1. 0 = FALSE 1 = TRUE
+- RWGL
+0x1 DefPhysical: Default Physical Select.
+- Specifies the default how the StreamID is selected
+for default accesses. 0 = DefVMIndx is used to select the StreamID. 1 = PhysStreamID is used 18:15
+- RWGL
+0x0 DefVMIndex: Default VM Index.
+- Specifies the default VM Index used to select the
+Stream ID when (DefPhysical == 0). 9:5
+- RWCL
+0x0 DefCarveOutID: Default MC Carveout ID. Specifies the carveout ID for default accesses.
+- This field specifies the state output on
+ast_master_a[w,r]user[15,11] for requests that do not match a region.
+- RWGL
+0x0 DefSnoop: Snoop.
+- Specifies if default accesses snoop the Main CPU
+caches.
+- This bit controls the state output on
+ast_master_a[w,r]user[8] for requests that do not match a region. 0 = Do not snoop request. 1 = Snoop request. 0 = DISABLE 1 = ENABLE
+- RW
+0x0 MatchErrCtl:
+- Match Error Control: Specifies how transactions that
+do not match a region are handled. 0 = Transactions that do not match a region are forwarded untranslated with the default attributes. 1 = Transactions that do not match a region return a decode error on the AXI slave interface. 0 = NO_DECERR 1 = DECERR
+
+- AST Registers
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RW1
+0x0 Lock: Security lock.
+- This bit prevents writing to all RWGL and
+RWGL_Region bits. 0 = FALSE 1 = TRUE
+- APS_AST_ERROR_STATUS_0
+OverFlow: This bit is set to 1 by Hardware when (Valid == 1) and a decode error response is generated by the AST VMIndxErr: This bit is set to 1 by Hardware when (Valid == 0) and a decode error response is generated by the AST because a disabled VMIndx was used Valid: This bit is set to 1 by Hardware when (Valid == 0) and a decode error response is generated by the AST Software can write this bit to 0 to clear the logged errors (Clears valid, overflow, error- address bits)
+- Offset: 0x4
+- Read/Write: See table below
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_GBL_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,x000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RO
+0x0 Overflow: Error Overflow.
+- This bit is set to 1 by Hardware when
+(AST_ERROR_STATUS[Valid] == 1) (as result of a previous error) and a new DEC_ERR occurs.
+- RO
+0x0 VMIndxErr: VM Index Error.
+- This bit is set to 1 by Hardware when
+(AST_ERROR_STATUS[Valid] == 0) and when a DEC_ERR response is returned because a disabled VMIndx was programmed.
+- RW
+0x0 Valid: Error valid.
+- This bit is set to 1 by Hardware when a DEC_ERR
+response is returned. 1 = Error Valid. Software can write this bit to 0 to clear the logged errors (Clears valid, overflow, error-address bits).
+- APS_AST_ERROR_ADDR_LO_0
+
+- AST Registers
+ErrAddrLo: Logs lower 32 bits of the request that caused a decode error. This field is not updated if (AST_ERROR_STATUS[Valid] == 1).
+- Offset: 0x8
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_GBL_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 ErrAddrLo: Error Address Low.
+- When a DEC_ERR response is returned and (AST_ERROR_STATUS[Valid]
+== 0), then the lower 32 bits of the error address are latched into this register. This field is not updated if (AST_ERROR_STATUS[Valid] == 1).
+- APS_AST_ERROR_ADDR_HI_0
+ErrAddrhi: Logs upper 32 bits of the request that caused a decode error. This field is not updated if (AST_ERROR_STATUS[Valid] == 1).
+- Offset: 0xc
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_GBL_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 ErrAddrHi: Error Address high.
+- When a DEC_ERR response is returned and (AST_ERROR_STATUS[Valid]
+== 0), the upper 32 bits of the error address are latched into this register. This field is not updated if (AST_ERROR_STATUS[Valid] == 1).
+- APS_AST_STREAMID_CTL_0
+This is an array of 16 identical register entries; the register fields below apply to each entry. Full register list is: APS_AST_STREAMID_CTL_[i], among which [i] belongs to [0..15].
+- Offset: 0x20,..,0x5c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_HYP_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,0000,0000,xxxx,xxx0)
+
+- AST Registers
+- Bit
+- Reset
+- Description
+15:8 0x0 StreamID:
+- This specifies the StreamID output when the VMIndx field is
+programmed to N in a region control register. N is the STREAMID_CTL register number. 0x0 Enable: VM Index Enable. When this bit is set StreamID[N] can be selected by the VMIndx N. 0 = VM Index disabled. 1 = VM Index enabled. 0 = DISABLE 1 = ENABLE
+- APS_AST_REGION_0_SLAVE_BASE_LO_0
+- Offset: 0x100
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_0_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxx0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- RWRL
+0x0 Enable: Region Enable. This enables the translation region. 0 = Translation region disabled. 1 = Translation region enabled, 0 = FALSE 1 = TRUE
+- APS_AST_REGION_0_SLAVE_BASE_HI_0
+- Offset: 0x104
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_0_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- AST Registers
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- APS_AST_REGION_0_MASK_LO_0
+- Offset: 0x108
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_0_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 Mask: Region Mask Address[31:12].
+- This field is used to mask incoming address bits when
+performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_0_MASK_HI_0
+- Offset: 0x10c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_0_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 Mask: Region Mask Address[63:32].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_0_MASTER_BASE_LO_0
+- Offset: 0x110
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- AST Registers
+- SCR Protection: APS_AST_SCR_AST_REG_0_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI Master interface.
+- The Output address is generated using the
+following equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_0_MASTER_BASE_HI_0
+- Offset: 0x114
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_0_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI Master interface.
+- The Output address is generated using the following
+equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_0_CONTROL_0
+- Offset: 0x118
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_0_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,0000,0xxx,xx00,000x,x0x0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RWGL_Region
+0x0 Physical:
+- Specifies how the StreamID is selected for a region
+match. 0 = VMIndx is used to select the StreamID 1 = PhysStreamID is used 18:15
+- RWRL
+0x0 VMIndex:
+- Specifies the VM Index used to select the Stream ID
+when (Physical == 0).
+
+- AST Registers
+- Bit
+R/W Attribute
+- Reset
+- Description
+9:5
+- RWCL
+0x0 CarveOutID: Specifies the carveout ID for the region. his field specifies the state output on ast_master_a[w,r]user[15,11] for requests that matches the region.
+- RWRL
+0x0 Snoop:
+- Specifies if region accesses snoop the Main CPU
+caches.
+- This bit controls the state output on
+ast_master_a[w,r]user[8] for requests that matches the region. 0 = Do not snoop request. 1 = Snoop request. 0 = DISABLE 1 = ENABLE
+- RW1
+0x0 Lock: This bit prevents writes to this region registers. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_1_SLAVE_BASE_LO_0
+- Offset: 0x120
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_1_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxx0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- RWRL
+0x0 Enable: Region Enable. This enables the translation region. 0 = Translation region disabled. 1 = Translation region enabled. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_1_SLAVE_BASE_HI_0
+- Offset: 0x124
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- AST Registers
+- SCR Protection: APS_AST_SCR_AST_REG_1_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- APS_AST_REGION_1_MASK_LO_0
+- Offset: 0x128
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_1_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 Mask: Region Mask Address[31:12].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_1_MASK_HI_0
+- Offset: 0x12c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_1_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 Mask: Region Mask Address[63:32].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_1_MASTER_BASE_LO_0
+- Offset: 0x130
+- Read/Write: R/W
+- Parity Protection: N
+
+- AST Registers
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_1_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI Master interface.
+- The Output address is generated using the
+following equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_1_MASTER_BASE_HI_0
+- Offset: 0x134
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_1_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI Master interface.
+- The Output address is generated using the following
+equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_1_CONTROL_0
+- Offset: 0x138
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_1_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,0000,0xxx,xx00,000x,x0x0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RWGL_Region
+0x0 Physical:
+- Specifies how the StreamID is selected for a region
+match. 0 = VMIndx is used to select the StreamID 1 = PhysStreamID is used 18:15
+- RWRL
+0x0 VMIndex:
+- Specifies the VM Index used to select the Stream ID
+when (Physical == 0).
+
+- AST Registers
+- Bit
+R/W Attribute
+- Reset
+- Description
+9:5
+- RWCL
+0x0 CarveOutID: Specifies the carveout ID for the region.
+- This field specifies the state output on
+ast_master_a[w,r]user[15,11] for requests that matches the region.
+- RWRL
+0x0 Snoop:
+- Specifies if region accesses snoop the Main CPU
+caches.
+- This bit controls the state output on
+ast_master_a[w,r]user[8] for requests that matches the region. 0 = Do not snoop request. 1 = Snoop request. 0 = DISABLE 1 = ENABLE
+- RW1
+0x0 Lock: This bit prevents writes to this region registers. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_2_SLAVE_BASE_LO_0
+- Offset: 0x140
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_2_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxx0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- RWRL
+0x0 Enable: Region Enable. This enables the translation region. 0 = Translation region disabled. 1 = Translation region enabled. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_2_SLAVE_BASE_HI_0
+- Offset: 0x144
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- AST Registers
+- SCR Protection: APS_AST_SCR_AST_REG_2_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- APS_AST_REGION_2_MASK_LO_0
+- Offset: 0x148
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_2_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 Mask: Region Mask Address[31:12].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_2_MASK_HI_0
+- Offset: 0x14c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_2_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 Mask: Region Mask Address[63:32].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_2_MASTER_BASE_LO_0
+- Offset: 0x150
+- Read/Write: R/W
+- Parity Protection: N
+
+- AST Registers
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_2_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI Master interface.
+- The Output address is generated using the
+following equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_2_MASTER_BASE_HI_0
+- Offset: 0x154
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_2_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI Master interface.
+- The Output address is generated using the following
+equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_2_CONTROL_0
+- Offset: 0x158
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_2_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,0000,0xxx,xx00,000x,x0x0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RWGL_Region
+0x0 Physical:
+- Specifies how the StreamID is selected for a region
+match. 0 = VMIndx is used to select the StreamID 1 = PhysStreamID is used 18:15
+- RWRL
+0x0 VMIndex:
+- Specifies the VM Index used to select the Stream ID
+when (Physical == 0).
+
+- AST Registers
+- Bit
+R/W Attribute
+- Reset
+- Description
+9:5
+- RWCL
+0x0 CarveOutID: Specifies the carveout ID for the region.
+- This field specifies the state output on
+ast_master_a[w,r]user[15,11] for requests that matches the region
+- RWRL
+0x0 Snoop:
+- Specifies if region accesses snoop the Main CPU
+caches.
+- This bit controls the state output on
+ast_master_a[w,r]user[8] for requests that matches the region. 0 = Do not snoop request. 1 = Snoop request. 0 = DISABLE 1 = ENABLE
+- RW1
+0x0 Lock: This bit prevents writes to this region registers. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_3_SLAVE_BASE_LO_0
+- Offset: 0x160
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_3_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxx0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- RWRL
+0x0 Enable: Region Enable: This enables the translation region. 0 = Translation region disabled. 1 = Translation region enabled. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_3_SLAVE_BASE_HI_0
+- Offset: 0x164
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- AST Registers
+- SCR Protection: APS_AST_SCR_AST_REG_3_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- APS_AST_REGION_3_MASK_LO_0
+- Offset: 0x168
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_3_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 Mask: Region Mask Address[31:12].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_3_MASK_HI_0
+- Offset: 0x16c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_3_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 Mask: Region Mask Address[63:32].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_3_MASTER_BASE_LO_0
+- Offset: 0x170
+- Read/Write: R/W
+- Parity Protection: N
+
+- AST Registers
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_3_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI Master interface.
+- The Output address is generated using the
+following equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_3_MASTER_BASE_HI_0
+- Offset: 0x174
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_3_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 MastBase: Region Master Base Address:
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI Master interface.
+- The Output address is generated using the following
+equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_3_CONTROL_0
+- Offset: 0x178
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_3_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,0000,0xxx,xx00,000x,x0x0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RWGL_Region
+0x0 Physical:
+- Specifies how the StreamID is selected for a region
+match. 0 = VMIndx is used to select the StreamID 1 = PhysStreamID is used 18:15
+- RWRL
+0x0 VMIndex:
+- Specifies the VM Index used to select the Stream ID
+when (Physical == 0).
+
+- AST Registers
+- Bit
+R/W Attribute
+- Reset
+- Description
+9:5
+- RWCL
+0x0 CarveOutID: Specifies the carveout ID for the region.
+- This field specifies the state output on
+ast_master_a[w,r]user[15,11] for requests that matches the region.
+- RWRL
+0x0 Snoop:
+- Specifies if region accesses snoop the Main CPU
+caches.
+- This bit controls the state output on
+ast_master_a[w,r]user[8] for requests that matches the region. 0 = Do not snoop request. 1 = Snoop request. 0 = DISABLE 1 = ENABLE
+- RW1
+0x0 Lock: This bit prevents writes to this region registers. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_4_SLAVE_BASE_LO_0
+- Offset: 0x180
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_4_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxx0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- RWRL
+0x0 Enable: Region Enable. This enables the translation region. 0=Translation region disabled. 1=Translation region enabled. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_4_SLAVE_BASE_HI_0
+- Offset: 0x184
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- AST Registers
+- SCR Protection: APS_AST_SCR_AST_REG_4_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- APS_AST_REGION_4_MASK_LO_0
+- Offset: 0x188
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_4_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 Mask: Region Mask Address[31:12].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_4_MASK_HI_0
+- Offset: 0x18c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_4_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 Mask: Region Mask Address[63:32].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_4_MASTER_BASE_LO_0
+- Offset: 0x190
+- Read/Write: R/W
+- Parity Protection: N
+
+- AST Registers
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_4_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI Master interface.
+- The Output address is generated using the
+following equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_4_MASTER_BASE_HI_0
+- Offset: 0x194
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_4_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI Master interface.
+- The Output address is generated using the following
+equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_4_CONTROL_0
+- Offset: 0x198
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_4_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,0000,0xxx,xx00,000x,x0x0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RWGL_Region
+0x0 Physical:
+- Specifies how the StreamID is selected for a region
+match. 0 = VMIndx is used to select the StreamID 1 = PhysStreamID is used 18:15
+- RWRL
+0x0 VMIndex:
+- Specifies the VM Index used to select the Stream ID
+when Physical=0.
+
+- AST Registers
+- Bit
+R/W Attribute
+- Reset
+- Description
+9:5
+- RWCL
+0x0 CarveOutID: Specifies the carveout ID for the region.
+- This field specifies the state output on
+ast_master_a[w,r]user[15,11] for requests that matches the region.
+- RWRL
+0x0 Snoop:
+- Specifies if region accesses snoop the Main CPU
+caches.
+- This bit controls the state output on
+ast_master_a[w,r]user[8] for requests that matches the region. 0 = Do not snoop request. 1 = Snoop request. 0 = DISABLE 1 = ENABLE
+- RW1
+0x0 Lock: This bit prevents writes to this region registers. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_5_SLAVE_BASE_LO_0
+- Offset: 0x1a0
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_5_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxx0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- RWRL
+0x0 Enable: Region Enable: This enables the translation region. 0 = Translation region disabled. 1 = Translation region enabled. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_5_SLAVE_BASE_HI_0
+- Offset: 0x1a4
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- AST Registers
+- SCR Protection: APS_AST_SCR_AST_REG_5_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- APS_AST_REGION_5_MASK_LO_0
+- Offset: 0x1a8
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_5_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 Mask: Region Mask Address[31:12].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_5_MASK_HI_0
+- Offset: 0x1ac
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_5_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 Mask: Region Mask Address[63:32].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_5_MASTER_BASE_LO_0
+- Offset: 0x1b0
+- Read/Write: R/W
+- Parity Protection: N
+
+- AST Registers
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_5_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 31:12 of the Base address for
+the region on the AXI Master interface.
+- The Output address is generated using the following
+equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_5_MASTER_BASE_HI_0
+- Offset: 0x1b4
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_5_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI Master interface.
+- The Output address is generated using the following
+equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_5_CONTROL_0
+- Offset: 0x1b8
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_5_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,0000,0xxx,xx00,000x,x0x0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RWGL_Region
+0x0 Physical:
+- Specifies how the StreamID is selected for a region
+match. 0 = VMIndx is used to select the StreamID 1 = PhysStreamID is used
+
+- AST Registers
+- Bit
+R/W Attribute
+- Reset
+- Description
+18:15
+- RWRL
+0x0 VMIndex:
+- Specifies the VM Index used to select the Stream ID
+when Physical=0 9:5
+- RWCL
+0x0 CarveOutID: Specifies the carveout ID for the region.
+- This field specifies the state output on
+ast_master_a[w,r]user[15,11] for requests that matches the region.
+- RWRL
+0x0 Snoop:
+- Specifies if region accesses snoop the Main CPU
+caches.
+- This bit controls the state output on
+ast_master_a[w,r]user[8] for requests that matches the region. 0 = Do not snoop request. 1 = Snoop request. 0 = DISABLE 1 = ENABLE
+- RW1
+0x0 Lock: This bit prevents writes to this region registers. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_6_SLAVE_BASE_LO_0
+- Offset: 0x1c0
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_6_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxx0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- RWRL
+0x0 Enable: Region Enable. This enables the translation region. 0 = Translation region disabled. 1 = Translation region enabled. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_6_SLAVE_BASE_HI_0
+- Offset: 0x1c4
+- Read/Write: R/W
+
+- AST Registers
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_6_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- APS_AST_REGION_6_MASK_LO_0
+- Offset: 0x1c8
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_6_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 Mask: Region Mask Address[31:12].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_6_MASK_HI_0
+- Offset: 0x1cc
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_6_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 Mask: Region Mask Address[63:32].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_6_MASTER_BASE_LO_0
+- Offset: 0x1d0
+
+- AST Registers
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_6_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI Master interface.
+- The Output address is generated using the
+following equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_6_MASTER_BASE_HI_0
+- Offset: 0x1d4
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_6_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI Master interface.
+- The Output address is generated using the following
+equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_6_CONTROL_0
+- Offset: 0x1d8
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_6_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,0000,0xxx,xx00,000x,x0x0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RWGL_Region
+0x0 Physical:
+- Specifies how the StreamID is selected for a region
+match. 0 = VMIndx is used to select the StreamID 1 = PhysStreamID is used
+
+- AST Registers
+- Bit
+R/W Attribute
+- Reset
+- Description
+18:15
+- RWRL
+0x0 VMIndex:
+- Specifies the VM Index used to select the Stream ID
+when (Physical = 0). 9:5
+- RWCL
+0x0 CarveOutID: Specifies the carveout ID for the region.
+- This field specifies the state output on
+ast_master_a[w,r]user[15,11] for requests that matches the region.
+- RWRL
+0x0 Snoop:
+- Specifies if region accesses snoop the Main CPU
+caches.
+- This bit controls the state output on
+ast_master_a[w,r]user[8] for requests that matches the region. 0 = Do not snoop request. 1 = Snoop request. 0 = DISABLE 1 = ENABLE
+- RW1
+0x0 Lock: This bit prevents writes to this region registers. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_7_SLAVE_BASE_LO_0
+- Offset: 0x1e0
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_7_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxx0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- RWRL
+0x0 Enable: Region Enable. This enables the translation region. 0 = Translation region disabled. 1 = Translation region enabled. 0 = FALSE 1 = TRUE
+- APS_AST_REGION_7_SLAVE_BASE_HI_0
+- Offset: 0x1e4
+- Read/Write: R/W
+
+- AST Registers
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_7_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 SlvBase: Region Slave Base Address.
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI slave interface.
+- This address is compared with the incoming slave
+address to determine if a region match occurs.
+- APS_AST_REGION_7_MASK_LO_0
+- Offset: 0x1e8
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_7_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 Mask: Region Mask Address[31:12].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_7_MASK_HI_0
+- Offset: 0x1ec
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_7_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 Mask: Region Mask Address[63:32].
+- This field is used to mask incoming address bits
+when performing the region compare.
+- This field is also used to mask untranslated address
+bits when generating the output address.
+- APS_AST_REGION_7_MASTER_BASE_LO_0
+- Offset: 0x1f0
+
+- AST Registers
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_7_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,xxxx,xxxx,xxxx)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:12
+- RWRL
+0x0 MastBase: Region Master Base Address.
+- This field specifies bits 31:12 of the Base address
+for the region on the AXI Master interface.
+- The Output address is generated using the
+following equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_7_MASTER_BASE_HI_0
+- Offset: 0x1f4
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_7_SEC_CONTROL_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+R/W Attribute
+- Reset
+- Description
+31:0
+- RWRL
+0x0 MastBase: Region Master Base Address:
+- This field specifies bits 63:32 of the Base address for
+the region on the AXI Master interface.
+- The Output address is generated using the following
+equation.
+- OutputAddress[63:12] = (InputAddress[63:12] &
+Mask[N]) | (MastBase[N] & !Mask[N]).
+- APS_AST_REGION_7_CONTROL_0
+- Offset: 0x1f8
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: APS_AST_SCR_AST_REG_7_SEC_CONTROL_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,0000,0xxx,xx00,000x,x0x0)
+- Bit
+R/W Attribute
+- Reset
+- Description
+- RWGL_Region
+0x0 Physical:
+- Specifies how the StreamID is selected for a region
+match. 0 = VMIndx is used to select the StreamID 1 = PhysStreamID is used
+
+- Control Plane
+- Bit
+R/W Attribute
+- Reset
+- Description
+18:15
+- RWRL
+0x0 VMIndex:
+- Specifies the VM Index used to select the Stream ID
+when Physical=0 9:5
+- RWCL
+0x0 CarveOutID: Specifies the carveout ID for the region.
+- This field specifies the state output on
+ast_master_a[w,r]user[15,11] for requests that matches the region.
+- RWRL
+0x0 Snoop:
+- Specifies if region accesses snoop the Main CPU
+caches.
+- This bit controls the state output on
+ast_master_a[w,r]user[8] for requests that matches the region. 0 = Do not snoop request. 1 = Snoop request. 0 = DISABLE 1 = ENABLE
+- RW1
+0x0 Lock: This bit prevents writes to this region registers. 0 = FALSE 1 = TRUE
+## 3.4 Control Plane
+### 3.4.1 Overview
+Backbone/CBB) provides the physical communication paths from the initiators (usually processors) to the register configuration spaces of targets. A module in Orin may be assigned one or more apertures in the SoC Address MAP (AMAP) for its control space. Software generates accesses to this control space for things like setting clocks, asserting resets, configuring DMA, as well as retrieving status, detecting features, reading data from or writing data to a polled device, synchronization, etc. The Control Plane is separate and different from the Data Plane, whose main function is providing high-bandwidth access to off-chip memory like external DDR-RAMs, and on-chip memory like internal SRAMs, via the SoC's data plane. In Orin, the control and data planes are completely orthogonal and do not intersect each other. The control plane is made up of: Control Backbone Fabric - the main control plane fabric across the entire chip. It hierarchically connects to other fabrics in clusters.
+
+- Control Backbone (CBB) Error Monitor
+- BPMP Fabric - the fabric in BPMP cluster
+- FSI Fabric - the fabric in SCE cluster
+- RCE Fabric - the fabric in RCE cluster
+- DCE Fabric - the fabric in DCE cluster
+- RCE Fabric - the fabric in RCE cluster
+- AON Fabric - the fabric in AON cluster
+In addition to those listed above, the Control Plane also includes Host Controller Fabric. In Orin, the Control Plane adds resilience features. These resilience features provide the ability to maintain an acceptable level of service in the presence of faults as well as other challenges to normal operations. If a fault is detected, the safety handling mechanisms for the system can deal with it as appropriate. The Control Plane is not documented in detail as it is invisible to software in normal operation.
+### 3.4.2 Control Backbone (CBB) Error Monitor
+#### 3.4.2.1 Error Monitor
+Each Root Master Node in CBB and Cluster Fabric contains an Error Monitor Module. The errors detected by the Error Monitor are described below.
+- Table 3.7 Errors Detected by CBB
+- Errors Detected by CBB
+- Error Source in CBB or Cluster Fabric
+- Slave Errors
+- AXI Slaves
+- APB Slaves1
+- Address Decode Errors
+- AXI Slaves
+- AXI Slave Nodes
+- APB Slave Nodes (AXI2APB Bridges)
+- Firewall Errors
+- ARF Shadow Block
+- BLF Shadow Block
+- Cluster Fabric Firewall Block(s)
+- Timeout Errors
+- AXI Slave Nodes
+- APB Slave Nodes (AXI2APB Bridges)
+- Powerdown Error
+- Power Interface (standalone)
+- Power Interface (inside APB Slave Nodes)
+- Unsupported Requests Error
+- AXI Slave Nodes
+- APB Slave Nodes (AXI2APB Bridges BE check)
+
+- Control Backbone (CBB) Error Monitor
+1 All errors from APB slaves are reported as slave errors. This includes:
+- Firewalls errors within APB slaves
+- Decode Errors within APB slaves
+- Writes to read only registers
+- Any other errors
+- The Error Monitor Module imports an attribute channel (comprising of access request and
+response attributes). This attribute channel is made available to the Error Monitor each time an error response is detected. In the event one beat of a read transaction is received with error flags set, the request attributes are immediately presented to the Error Monitor, without waiting for subsequent beats. This allows the first access in error to be logged. In case of interleaved read responses this allows error reporting to happen immediately. Error Monitor logs the attributes into its internal registers and asserts (0->1, level) the err_monitor_int output. The error bits that the Error Monitor looks at are: ruser, buser bits which indicate slverr ruser, buser bits which indicate decerr ruser, buser bits which indicate powerdown error ruser, buser bits which indicate firewall error ruser, buser bits which indicate timeout error ruser, buser bits which indicate unsupported access error
+- Table 3.8 ERR_STATUS Register Updated in Error Monitor
+[b|r]user
+- Slverr
+[b|r]user decerr [b|r]user firewall [b|r]user powerdown [b|r]ruser timeout [b|r]ruser unsupported
+- Recorded In Error
+- Monitor
+- Slave Error
+- Decode Error
+- Firewall Error
+- PowerDown Error
+- Timeout Error
+- Unsupported Access
+- Error
+The bits above may be set in plurality and are recorded as such. An APB port in the Error Monitor enables software accesses to its registers. 1.
+- All accesses to Error Monitor must be 32 bits and have all byte strobes asserted. Byte
+strobes are ignored by Error Monitor and the accesses are treated as though with all byte strobes asserted.
+
+- Control Backbone (CBB) Error Monitor
+2.
+- Write access to Read Only registers generates SLVERR. In the event this access happens
+when there is already an error logged in the Error Monitor, then the notification of this error and its logging gets dropped. Read access to all registers is allowed.
+- Accesses to unimplemented registers return SLVERR
+Error Monitor uses the clock of the Master Node. The value of the other registers when the *ERR_STATUS_0 is not set is don't care, i.e. 3. 4. 5. 6. a. b. The registers can hold either the reset value, or any last error logged value.
+- The registers can continue to hold their value when the *ERR_STATUS_0 bits are cleared
+7.
+- Error Monitor implements the mechanism to force the err_monitor_int for each error. This
+can be used by verification, validation and as a mechanism to check sanity of error reporting in Safety platforms. a. Asserting error through the Force mechanism does not assert LOG_ERR_STATUS_0*. Correspondingly all * LOG_* registers hold bogus values. 8.
+- Any error can be disabled from being reported through the ERR_EN register. This causes the
+- HW to drop the errors when which have ERR_EN=0. In the event an access has multiple errors
+asserted, and there is at least 1 error which is enabled, then the logging of error is done, but the disabled error is not reported. For ex, Firewall Error was configured as disabled, and an access returned with firewall + decode error, then the access will be reported as only a decode error. Error Monitors store only the access attributes for the first transaction in error. Subsequent responses in in error are recorded as Overflow Status indication. This implies that the depth of Error Monitor logging is essentially for one single transaction.
+- LOG_* registers are updated when below conditions are met:
+1. 2.
+- ERR_STATUS_0 = 0x0
+- LOG_* does not already log an error
+##### 3.4.2.1.1 Error Notifier
+The Error Notifier Module is implemented once per fabric. It collates the err_monitor_int from various Error Monitor blocks and presents a single interrupt to the SoC Interrupt Controller (LIC). The Error Notifier does not latch the interrupt locally, rather simply reflects the value of the input err_monitor_int signals into its STATUS_0 register. It implements a corresponding enable bit per err_monitor_int in INTERRUPT_ENABLE_0 register. The Error Notifier also implements Force Bits per error maintained in the corresponding STATUS register. When a bit <FABRIC>_ERR_NOTIFIER_FORCE_0_0 register is set, it has the same effect as though the corresponding STATUS bit were set (without setting the STATUS bit). If the corresponding bit in the INTERRUPT_ENABLE register is set, an interrupt will be asserted from the Error Notifier block. This bit can be used for software development and for connectivity checking.
+
+- Control Backbone (CBB) Error Monitor
+The interrupt generation pseudocode looks like below: <FABRIC>_EN_CFG_int = OR reduction operator ((status_0 | force_0) & interrupt_enable_0); //
+- Bitwise OR followed by AND followed by reduction operator
+To clear the interrupt from the Error Notifier, software must service the respective Error Monitor. This deasserts the interrupt from the Error Monitor to Error Notifier, leading to the STATUS_0 being cleared in Error Notifier, and subsequent de-assertion of the interrupt from the Error Notifier. The Error Notifier implements an APB Interface port to access its configuration space. All accesses to Error Notifier must be 32 bits and have all byte strobes asserted. Byte strobes are ignored by Error Notifier and the accesses are treated as though with all byte strobes asserted. Write access to Read Only registers generates SLVERR. Read access to all registers is allowed. Accesses to unimplemented registers return SLVERR. Since the Error Notifier is also an APB slave, errors returned by it are also logged as they would in case of any other erroneous access in the system.
+##### 3.4.2.1.2 Handling CBB Interrupts (Error Monitor/Notifier)
+Step 0: Base address to be used to prefix to Error Notifier registers:
+- NV_ADDR_MAP_CBB_<FABRIC>_EN_CFG_BASE
+Base address to be used to prefix to Error Monitor registers: To be determined by reading the Error Notifier registers. Step 1: Enable Error Reporting in Error Notifier for desired Error Monitors, to be done once.
+- Set required bits in <FABRIC>_EN_CFG_INTERRUPT_ENABLE_0_0.ERR_EN_<i>, where i = 0 to
+number of error monitors in the fabric. Step 2: On receiving an interrupt, the Error Notifier Status register from the Interrupt Handler of the Error Notifier Interrupt.
+- Read <FABRIC>_EN_CFG_STATUS_0_0.ERR_<i>, where i = 0 to number of error monitors in the
+fabric. Step 3:
+
+- Control Backbone (CBB) Error Monitor
+Query the Address of the Error Monitor which logged the error.
+- Write 1 hot encoded error value read from the <FABRIC>_EN_STATUS_0_0 register into
+<FABRIC>_EN_CFG_ADDR_INDEX_0_0. Note: In the event multiple bits are set in this register, it indicates that multiple Error Monitors detected valid errors. Software must query each Error Monitor one by one.
+- Read <FABRIC>_EN_CFG_ADDR_HI_0 register
+- Read <FABRIC>_EN_CFG_ADDR_LOW_0 register
+Determine address of the Error Monitor: uint_64 addr = (<FABRIC>_EN_CFG_ADDR_HI_0 << 32) | <FABRIC>_EN_CFG_ADDR_LOW_0 Step 4: Determine if the Error Monitor is powered up. In general, not needed as the power gating firmware does not abruptly Power Gate IPs. A race condition could power gate the error monitor partition which generated the error before the error could be handled. To avoid this, software may query the PMC registers.
+- PMC_IMPL_PART_<>_POWER_GATE_STATUS_0 registers or IPC with BPMP before accessing the
+Error Monitor. Step 5:
+- Check if the Error Monitor at the above address indeed has one of its status bits set in
+ERR_STATUS_0 register. If yes, go to next step, else issue fatal error in software (Error Notifier received a spurious notification). For example: <FABRIC>_<MasterNode>_ERR_EN_0 = offset 0x200 <FABRIC>_<MasterNode>_ERR_FORCE_0 = offset 0x204 <FABRIC>_<MasterNode>_ERR_STATUS_0 = offset 0x208 <FABRIC>_<MasterNode>_ERR_OVERFLOW_STATUS_0 = offset 0x20C Step 6:
+- Check if <FABRIC>_<MasterNode>_ERR_OVERFLOW_STATUS_0.OVERFLOW* bits are set. These bits
+indicate occurrence of plurality of an error before its corresponding Error Status register was cleared by software. In general, it is the first error which is of most importance and should be debugged first. This register gives a hint to software on the type of issue that could have happened.
+
+- Control Backbone (CBB) Error Monitor
+Note: For an AXI read burst access, if multiple beats respond with error, then the OVERFLOW bits will be set for the same access. Step 7: Then address/attributes of the first logged error can be determined by reading the *LOG* error registers. Use the base address = at the "addr" determined from previous step.
+- First logged error = addr + <FABRIC>_<MasterNode>_LOG_ERR_STATUS_0 (note that if the first
+error had multiple error bits set, then this register will also have multiple bits set).
+- Address of access which returned the first error = (addr +
+<FABRIC>_<MasterNode>_LOG_ADDR_HIGH_0 << 32) | (addr + <FABRIC>_<MasterNode>_LOG_ADDR_LOW_0) Attributes of access which returned the first error; (refer to the header file to understand each field of the below registers):
+- Read addr + <FABRIC>_<MasterNode>_LOG_ATTRIBUTES0_0
+- Read addr + <FABRIC>_<MasterNode>_ LOG_ATTRIBUTES1_0
+- Read addr + <FABRIC>_<MasterNode>_ LOG_ATTRIBUTES2_0
+- Read addr + <FABRIC>_<MasterNode>_ USER_BITS0_0
+Note: For Timeout Errors emanating from APB SlaveNodes per client timeout error bit also needs to be cleared in the following register.
+- Query: <FABRIC>_SN_AXI2APB_<>_BLOCK<> _TMO_STATUS_0
+If non-zero, determine bit which is non-zero. Recover the IP which gave timeout.
+- Clear client bit in <FABRIC>_SN_AXI2APB_<>_BLOCK<from above> _TMO_0
+Step 8: Write 1 to Clear the Error Monitor register to enable subsequent Error Logging.
+- Set: addr + <FABRIC>_<MasterNode>_ STATUS_0 = 0x3F
+Software must clear all bits in 1 single write. This also clears:
+- ERR_OVERFLOW_STATUS_0
+- LOG_ERR_STATUS_0 register
+Note: It is legal to clear specific bits of the <FABRIC>_<MasterNode>_ STATUS_0 register. The corresponding bits in the ERR_OVERFLOW_STATUS_0 and LOG_ERR_STATUS_0 will also get cleared while others remain unaffected. This, however, complicates programming sequence of software but can be used during debug, if needed and if found useful.
+
+- General Purpose Direct Memory Access (DMA) Engines
+## 3.5 General Purpose Direct Memory Access (DMA)
+- Engines
+### 3.5.1 Overview
+same architecture, as follows: 1.
+- General-Purpose Central DMA controller (GPC-DMA, also referred to as GPCDMA) placed on
+the Control Fabric. It has 32 fully programmable independent channels which can be programmed by different masters.
+- DMA engine as part of the BPMP subsystem (BPMP-DMA). It has four fully programmable
+independent channels.
+- DMA engine as part of the SCE subsystem (SCE-DMA). It has eight fully programmable
+independent channels.
+- DMA engine as part of the RCE subsystem (RCE-DMA). It has eight fully programmable
+independent channels.
+- DMA engine as part of the DCE subsystem (DCE-DMA). It has eight fully programmable
+independent channels.
+- DMA engine as part of the AO subsystem (AON-DMA). It has eight fully programmable
+independent channels. Note that AON-DMA has no safety support.
+- DMA engine as part of the PSC subsystem (PSC-DMA). It has four fully programmable
+independent channels.
+- DMA engine as part of the FSI subsystem (FSI-DMA). It has eight fully programmable
+independent channels. 2. 3. 4. 5. 6. 7. 8.
+- Each DMA engine provides the capability of either being used to write a block of data from
+- Memory Mapped IO (MMIO) devices, to DRAM or SysRAM system memory via the Memory
+- Subsystem (MSS), or to read a block of data from DRAM or SysRAM system memory to MMIO
+devices without any processor intervention. In addition, GPC-DMA can copy data to and from any memory mapped peripheral to system memory with and without flow control. Note that APB is sometimes used in this document to refer to MMIO. The APB bus is still used in parts of the control fabric, but the General-Purpose DMA engine is not restricted to only APB devices. This document generally describes the central GPC-DMA controller block, but the instances of the DMA engine are functionally alike except where noted. GPC-DMA connections to the reset of the SoC are shown below.
+
+- General Purpose Direct Memory Access (DMA) Engines
+**Figure 3.11 GPC-DMA Top Level Connection Block Diagram**
+#### 3.5.1.1 Features
+GPC-DMA engine serves APB clients that require memory access. GPC-DMA engine supports APB devices on any Fabric AXI2APB bridge. GPC-DMA engine can copy data from any addressable memory to/from DRAM/SysRAM. Firmware backwards-compatibility with legacy APBDMA drivers. Legacy flow-control support. Removes the dependency on APB bus by issuing pipelined AXI requests. Direct access to memory via AXICIF. DMA engine has a standard interface. Channels are independent from each other.
+- CCPLEX to control different channels and cluster DMAs. They are managed by corresponding
+cluster Cortex-R5s or Cortex-R52 (in case of FSI). Virtualization support: each channel's registers are in an independent 64K aperture. Functional safety by duplication, ECC for shared buffer and error collator.
+#### 3.5.1.2 New Hardware Features
+- Any pending transactions (requests or responses) are allowed to make forward progress and
+complete. The Busy bit indicates if there is any pending transaction still in flight.
+
+- General Purpose Direct Memory Access (DMA) Engines
+A lock bit per channel in the Hypervisor controlled Channel to block any malicious GuestOS from changing key registers that could end up in HOL blocking scenarios and potentially blocking another GuestOS channels from making forward progress.
+- For Cortex-R5 DMAs only, the RDRSP queue (common response buffer for all channels) on
+the MSS read interface has been increased from a depth of 16 bytes (2 x 8 transactions) to a depth of 256 bytes (32 x 8 transactions). The increase in queue depth matches the maximum number of outstanding read responses in order to solve the DMA deadlock scenario of DRAM access and TCM access at the same time.
+#### 3.5.1.3 Support for Legacy MMIO DMA Hardware Features
+- The GPC-DMA includes the following capabilities from the MMIO DMA hardware in prior NVIDIA
+SoCs. Two modes of operation: single transfer (once) or continuous. Enable bit for each channel. Programmable burst sizes of one, four, eight, and 16 words. For memory, support for two and 16 word burst. Maximum transfer size is 1 GB per channel, with the minimum size being one word. Trigger and flow control mechanism support per channel. These are additional controls apart from channel enable on which the transfer depends. Trigger starts a channel to start the transfer, and flow is used to proceed with every new burst transfer. These events are under software control or hardware control. Channel to channel trigger support, which is the ability to link up channels to start at the end of another channel's transfer, allowing scattering/gathering of physical memory.
+- Interrupt enable at the end of transfer with the ability to mask or route to a desired
+processor. Wrap mode supported for all channels in Once mode. Round robin arbitration among channels at burst granularity. Direction bit to determine the direction of transfer MSS to MMIO or MMIO to MSS. Separate source address and destination address. MSS addresses are 40-bit wide. Wrap feature: enables the address to wrap back to starting address after N words of transfer. For example, if the address starts at 0x4 with a burst of four words, then the address would increment as 0x4, 0x8, 0xC, 0x10, 0x4, .... If disabled, it would be 0x4, 0x8, 0xC, 0x10, 0x14. Note that WRAP setting must be multiple of MMIO burst.
+#### 3.5.1.4 Supported Legacy Software Features
+The GPC-DMA also includes these hardware features:
+- AXI/PCLK with 1:1 ratio synchronous clock
+- Three directional bits to determine the direction of transfer
+
+- General Purpose Direct Memory Access (DMA) Engines
+- SysRAM-DRAM to SDRAM-SysRAM
+- Fixed pattern write to SysRAM-SDRAM
+- Programmable burst sizes of one, two, four, eight, 16 words on MMIO, two and 16 words on
+memory.
+- Transfer size in words
+- Byte enable support
+- Interrupts per channel can be routed to CCPLEX, BPMP, SCE, or SPE. An additional interrupt
+for common space. Interrupt generation per channel after last burst write response (MMIO or Memory). Support TrustZone® and NV security privileges per channel for a given master. Error handling and DMA engine termination upon errors. Virtualization support by placing channel registers in a 64K aperture. Interrupt is generated when the last response data is received from the MSS for Rx mode, or once the last response data is received from the MMIO bus while reading from MSS (Tx mode).
+- Memory to Memory DMA transfer
+- The FIFO trigger levels (in the modules) need to be programmed so they do not lead to an
+overflow/underflow of the FIFO.
+- Software programs all the registers of channel ensuring that the channel enable bit is
+disabled. Set the channel enable bit last. If channel is disabled while transfer is in progress, the transfer ends after ongoing burst is completed and an interrupt is generated (if that interrupt is enabled).
+- Busy bit gets set as soon as the DMA channel is enabled and gets cleared after transfer is
+completed. Interrupts write 1 to clear.
+- The default wraparound on the MMIO side is wrapping on one word. It prevents unnecessary
+address switching on the MMIO.
+- The parameters of the channel must be programmed first (base address, wrap-around, etc.),
+then the control register of that channel is programmed. If the control register is programmed first, the current parameters of the DMA would be considered as the programmed values.
+### 3.5.2 Functional Description
+There are 32 channels in GPC-DMA. A DMA channel can transfer a specified range of data between a memory address space (SysRAM or external memory) and an MMIO address space. A DMA channel can also transfer data between a memory address space and another memory address space (Mem-to-Mem copy). The DMA controller follows a simple round robin arbitration scheme between the channels, starting with channel 0.
+
+- General Purpose Direct Memory Access (DMA) Engines
+Each channel can have an independent burst transfer size programmed to one word, two words, four words, eight words, or 16 words. For Memory transfers, we only support two word and 16 word bursts. There is a corresponding read/write buffer in the memory buffer manager for each channel. There is also a corresponding buffer for each channel on the peripheral side.
+#### 3.5.2.1 DMA Functionality: Mem-MMIO
+After programming the DMA channel with the starting MMIO and MSS address, the burst size and the total transfer byte count, the DMA engine can be enabled by setting the channel enable bit.
+#### 3.5.2.2 Peripheral Rx Mode: DMA Read from MMIO Peripheral to Memory
+The burst size and the FIFO trigger levels in the MMIO slave need to be programmed such that they do not lead to an overflow/underflow of the FIFOs in the peripheral. This means that the controller FIFO thresholds need to be set correctly based on DMA request size. In flow control mode, the DMA engine waits for the flow control request from the peripheral controller to trigger a transfer to the DMA. Then DMA transfers that burst for the given channel. If the burst size is eight, then a 32-byte request can be initiated on the memory interface. For some clients that have support like QSPI, a burst size of 16 words can be initiated to fill the 64-byte buffer in the buffer manager. The buffer control uses byte enable control for unaligned transfers and for the residual bytes if the remaining transfer is less than 32/64 bytes. A burst size of four is also supported, but in this case multiple bursts are needed to initiate the 32/64 byte transfers on the memory interface. Once an Rx request has been initiated to the DMA by the peripheral, the DMA engine initiates a read request from the peripheral FIFO. In case the peripheral is fast enough to fill in the second burst and to increase the DMA engine performance, the Peripheral Control block has the option of initiating two outstanding read requests to transfer bursts from the peripheral FIFO to system memory. The number of MMIO outstanding requests is set in channel register space.
+#### 3.5.2.3 Peripheral Tx Mode: DMA Write from Memory to MMIO
+The burst size and the FIFO trigger levels in the MMIO slave need to be programmed so they do not lead to an overflow/underflow of the FIFOs in the MMIO client. By default, the DMA engine always initiates a 64-byte read from the MSS for the best system memory utilization. Upon receiving the read data in the buffer, and in case the burst size programmed is eight, then a 32-byte data transfer can occur to the MMIO slave. For clients that support a burst size of 16 words, then all 64 bytes can be transferred. Once a Tx request has been initiated to the DMA by the peripheral, the DMA engine initiates a read request from memory. If the peripheral is fast enough to read in the current burst request and to increase the DMA engine performance, the Peripheral Control block has the option of initiating two outstanding write requests to transfer bursts from the system memory to the peripheral FIFO. In
+
+- General Purpose Direct Memory Access (DMA) Engines
+this case, the second write request is queued in the bridge until the peripheral is ready to consume the second burst. In this mode, the Peripheral Control block has to keep track of the outstanding requests and their responses relative to the total transfer byte count needed. The number of MMIO outstanding requests is set in channel register space.
+#### 3.5.2.4 MEM-MEM DMA Mode
+- MEM-MEM mode can read and write channels that are used to copy data from one memory
+location to another. The read channel keeps track of the total transfer size. The RD_MEM engine initiates multiple outstanding read requests to the MSS for higher bandwidth. Once the read data arrives, the RD_MEM block copies this data to the corresponding write buffer in the WR_MEM block. The WR_MEM block in return sends the write data to system memory with a different address. This process continues until all data is copied.
+### 3.5.3 Programming Guidelines
+#### 3.5.3.1 Main Programming Steps
+All the registers of a channel need to be programmed before the Channel Enable bit is set.
+- Program the MSS Starting Address and MMIO Starting address in GPC-DMA-X Source
+Address Pointer and GPC-DMA-X Destination Address Pointer registers.
+- Program the required BURST size, WRAP word window size, and the GPC-DMA-X MSS
+Address Sequencer register. The MSS BUS width is fixed to 64-bit bus.
+- Program the required MMIO_BUS_WIDTH (as the peripheral) and WRAP word window size in
+the MMIO Address Sequencer register.
+- Program the number of words to be transferred in the
+- GPCDMA_CHANNEL_CH<X>_WCOUNT_0 register. This register needs to be programmed
+with number of words to be transferred -1. Program the Trigger in GPC-DMA-X Control-Extended register.
+- Program the Interrupt option, FC mode, DMA transfer direction, Transfer mode, and Flow
+- Enable in GPCDMA_CHANNEL_CHx_CSR_0 register. Write the channel Enable bit in the same
+register.
+- Whenever the Channel ENB bit is enabled, the DMA starts the data transfer. The security
+attributes after writing Channel Enable are latched and used by the current DMA engine for peripheral access. MSS security is programmed under GPC-DMA-X MSS Address Sequencer. Each channel's status is observed by polling the GPCDMA_CHANNEL_CH<X>_STA register.
+- The number of words remaining to be transferred are in the
+GPCDMA_CHANNEL_CH<X>_DMA_WORD_TRA register.
+- Tx/Rx Flow/Trigger requesters are programmed in the GPCDMA_CHANNEL_CHx_CSR_0
+register.
+
+- General Purpose Direct Memory Access (DMA) Engines
+#### 3.5.3.2 GPC-DMA Address Space
+- For different DMA register programming, use the following address rules for IP base and IP
+register:
+- For GPC-DMA: NV_ADDRESS_MAP_GPCDMA_BASE + GPCDMA_CHANNEL_XXXXXXX
+- For BPMP-DMA: NV_ADDRESS_MAP_BPMP_DMA_BASE + GPCDMA_FLV_4CH_XXXXXXX
+- For SCE-DMA: NV_ADDRESS_MAP_SCE_DMA_BASE + GPCDMA_FLV_8CH_XXXXXXX
+- For RCE-DMA: NV_ADDRESS_MAP_RCE_DMA_BASE + GPCDMA_FLV_8CH_XXXXXXX
+- For DCE-DMA: NV_ADDRESS_MAP_DCE_DMA_BASE + GPCDMA_FLV_8CH_XXXXXXX
+- For AO-DMA: NV_ADDRESS_MAP_AON_DMA_BASE
++ GPCDMA_FLV_8CH_NON_SAFE_XXXXXXX
+- For PSC-DMA: NV_ADDRESS_MAP_PSC_DMA_BASE + GPCDMA_FLV_4CH_XXXXXXX
+- For FSI-DMA: NV_ADDRESS_MAP_FSI_DMA_BASE + GPCDMA_FLV_8CH_XXXXXXX
+#### 3.5.3.3 Pause Mode
+- Setting the CHANNEL_PAUSE bit in GPCDMA_CHANNEL_CHx_CSR_0 register blocks any
+controller requests from being serviced. All transfers that are in progress are allowed to continue and make forward progress. Clearing CHANNEL_PAUSE resumes the transfers.
+- Do not disable a channel when a channel busy bit is asserted (BSY0-31). Pause mode flushes
+out all pending requests from GPC-DMA and any inflight data on MSS and MMIO bus. Upon pausing the channel, the programming sequence is: Software waits for the DMA channel to be idle (busy bit deasserted). Software now can disable the paused channel or un-pause the channel. To restart the channel after disable, the pause bit must be cleared first.
+- In unaligned source/destination address cases, the pause mode does not flush out the data
+correctly.
+- If there was a mismatch in burst sizes between MMIO and MSS (MMIO burst > MSS burst),
+the pause mode does not flush out data correctly.
+- If an error occurred during pause mode, then an error interrupt is asserted and software
+shall reset the DMA engine. Maximum latency for waiting for MSS traffic from DMA to be committed is 100 µs. Typically, all transactions have been committed by this time in pause mode.
+#### 3.5.3.4 Abrupt Channel Disable
+If channel ENB is disabled abruptly while a transfer is in progress, the transfer ends after completing any burst sequence that is in progress. GPC-DMA does not flush out remaining data in local buffers.
+
+- General Purpose Direct Memory Access (DMA) Engines
+#### 3.5.3.5 Busy Bit
+The Busy bit is read only and gets set when there is any inflight transaction either internally to DMA, on the MMIO interface, or on the MSS interface. The bit is cleared by Hardware after all pending transfers are completed.
+#### 3.5.3.6 Enable (ENB) Bit
+- GPC-DMA channel enable bit ENB in GPCDMA_CHANNEL_CHX_CSR_0 is auto cleared after
+receiving an in-band error. In that case, the enable bit is cleared after all pending transactions are completed.
+- GPC-DMA channel enable bit ENB in GPCDMA_CHANNEL_CHX_CSR_0 is auto cleared after
+all DMA transactions are completed in single mode. In that case, the enable bit is cleared after all pending transactions are completed. For re-use cases, software must enable the bit after reprogramming DMA.
+#### 3.5.3.7 DMA Interrupt
+Interrupts are write-1-to-clear, i.e., interrupt bit is cleared when the value of write data corresponding to the bit position of the interrupt bit is 1.
+#### 3.5.3.8 Controller FIFO Size
+The APB burst size and the FIFO trigger levels (in the peripheral controller) need to be programmed so they do not lead to an overflow/underflow of the FIFOs in the APB client. One limitation is that they need to be the same.
+#### 3.5.3.9 Transfer Alignment
+MSS requests are always aligned to 4 Bytes (lower 2 bits are zeros). MMIO requests are always aligned to 4 Bytes (lower 2 bits are zeros).
+- When flow control is enabled, the number of words to be transferred must always be a
+multiple of the burst size/MMIO trigger level.
+- The DMA wraparound needs to be programmed keeping in mind the address that is
+programmed in the BM start address and the burst size.
+#### 3.5.3.10 WCOUNT Register
+If the DMA channel is enabled, then source/destination addresses BCOUNT can be reprogrammed during data transfer and after enabling the channel. WCOUNT can be a multiple of burst sizes: In case of Mem2Mem copy, Word Count could be any nonzero number within 1 GB.
+
+- General Purpose Direct Memory Access (DMA) Engines
+In case of mem2mmio or mmio2mem copy, Word Count should be a multiple of I/O burst size.
+#### 3.5.3.11 Continuous Mode
+In continuous mode single buffer mode, software has two separate buffers that are maintained by software to emulate the hardware ping pong buffer. In this mode, software enables the DMA with the ping-buffer address and then reprograms the DMA with pong buffer after enabling the DMA. The DMA registers are shadowed (latched) every time upon entering the continuous cycle. The register programming can be done for the pong buffer either after enabling the channel (for the first reprogramming) or receiving an interrupt (for any subsequent reprogramming). Software has requested 15 ms interrupt latency as the worst case requirement.
+- If interrupt latency is not guaranteed, then pausing the DMA channel is needed before
+reprogramming the new address/word count. The pause mode must be done before receiving an end of transfer (EoT) interrupt that guarantees it does not re-transfer to the same buffer. If DMA channel in Rx mode is abruptly disabled in a continuous mode during a transfer, then:
+- For this mode, use FC_mode = 0
+- Set MMIO burst size = 16W
+If the I/O controller generates an interrupt, the Rx request line should not be asserted. The last MSS request should be committed to MSS before disabling the channel.
+- As a precautionary measure, the CPU should disable this channel after ensuring there is no
+- DMA activity on MSS or MMIO by reading the DMA_IO_MC_ACTIVE status register under
+GPCDMA_COMMON_DMA_ACTIVE_0. Any residual words in the I/O controller FIFO should be cleared by host.
+#### 3.5.3.12 HOL Blocking
+Since DBB does not support OOO for all GPC-DMA channels, and if there is more than one channel running in either Tx or Rx mode, a HOL blocking can occur on DBB if the outstanding request size is more than two for any of these channels. For BPMP-DMA/GPC-DMA only, if more than two channels are used, then FC_MODE = 0x3 and MMIO_BURST = 64B should never be programmed.
+#### 3.5.3.13 Non-continuous SPI Mode
+For non-continuous SPI mode:
+- The external device might stop sending data after some logical boundary, so software
+programs GPCDMA for the maximum possible data transfer size based upon use case. SPI is programmed for 4B/1W Rx mode as trigger level. GPCDMA channel is programmed for 4B/1W MMIO burst size.
+
+- GPC-DMA Registers
+- GPCDMA channel is programmed for 64B/16W MSS burst size (default value in spec, so no
+need to program explicitly). SPI generates an interrupt to the CPU when the external device stops sending data.
+- Based upon this interrupt, DMA CH_BSY = 1 && SPI RX_FIFO is empty, write DMA Channel
+Pause Bit and wait for CH_BSY status to go low.
+- When CH_BSY bit is 0, it is expected that the SPI Transfer Count Status is equal to
+DMA_BYTE Count Status register.
+- If SPI Transfer count status < DMA_BYTE Count status by 1B/2B/3B, discard that data before
+providing it to consumer.
+### 3.5.4 GPC-DMA Registers
+This section contains registers for the GPC-DMA engine. Refer to the appropriate section for DMA registers supporting each associated instance of the General-Purpose DMA engine (e.g., Always- On, BPMP, SCE, RCE, and PSC).
+#### 3.5.4.1 COMMON Registers
+- GPCDMA_COMMON_DMA_CHAN_STA_0
+- Offset: 0x0
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_DMA_RO_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0
+- CH31
+0x0
+- CH30
+0x0
+- CH29
+0x0
+- CH28
+0x0
+- CH27
+0x0
+- CH26
+0x0
+- CH25
+0x0
+- CH24
+0x0
+- CH23
+0x0
+- CH22
+0x0
+- CH21
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0
+- CH20
+0x0
+- CH19
+0x0
+- CH18
+0x0
+- CH17
+0x0
+- CH16
+0x0
+- CH15
+0x0
+- CH14
+0x0
+- CH13
+0x0
+- CH12
+0x0
+- CH11
+0x0
+- CH10
+0x0
+- CH9
+0x0
+- CH8
+0x0
+- CH7
+0x0
+- CH6
+0x0
+- CH5
+0x0
+- CH4
+0x0
+- CH3
+0x0
+- CH2
+0x0
+- CH1
+0x0
+- CH0
+- GPCDMA_COMMON_REQUESTORS_TX_0
+- Offset: 0x4
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_DMA_RO_0
+- Reset: 0x00000000 (0b00xx,00x0,0000,0x00,0x00,xx00,x00x,0000)
+- Bit
+- Reset
+- Description
+0x0
+- I2C9
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0
+- I2C6
+0x0
+- I2C7
+0x0
+- I2C4
+0x0
+- I2C5
+0x0
+- I2C3
+0x0
+- I2C2
+0x0
+- I2C
+0x0
+- UARTE
+0x0
+- UARTD
+0x0
+- SPI3
+0x0
+- SPI2
+0x0
+- SPI1
+0x0
+- UARTH
+0x0
+- UARTF
+0x0
+- UARTB
+0x0
+- UARTA
+0x0
+- QSPI1
+0x0
+- QSPI0
+0x0
+- UARTC
+0x0
+- UARTG
+0x0
+- I2C10
+0x0
+- I2C8
+- GPCDMA_COMMON_REQUESTORS_RX_0
+- Offset: 0x8
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_DMA_RO_0
+- Reset: 0x00000000 (0b00xx,00x0,0000,0x00,0x00,xx00,x00x,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0
+- I2C9
+0x0
+- I2C6
+0x0
+- I2C7
+0x0
+- I2C4
+0x0
+- I2C5
+0x0
+- I2C3
+0x0
+- I2C2
+0x0
+- I2C
+0x0
+- UARTE
+0x0
+- UARTD
+0x0
+- SPI3
+0x0
+- SPI2
+0x0
+- SPI1
+0x0
+- UARTH
+0x0
+- UARTF
+0x0
+- UARTB
+0x0
+- UARTA
+0x0
+- QSPI1
+0x0
+- QSPI0
+0x0
+- UARTC
+0x0
+- UARTG
+0x0
+- I2C10
+0x0
+- I2C8
+- GPCDMA_COMMON_COMMON_ERROR_STA_0
+- Offset: 0xc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_COMMON_CHANNEL_ERROR_STA_0
+- Offset: 0x10
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_COMMON_CHANNEL_TRIG_REG_0
+- Offset: 0x18
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_DMA_RO_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0
+- CH31
+0x0
+- CH30
+0x0
+- CH29
+0x0
+- CH28
+0x0
+- CH27
+0x0
+- CH26
+0x0
+- CH25
+0x0
+- CH24
+0x0
+- CH23
+0x0
+- CH22
+0x0
+- CH21
+0x0
+- CH20
+0x0
+- CH19
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0
+- CH18
+0x0
+- CH17
+0x0
+- CH16
+0x0
+- CH15
+0x0
+- CH14
+0x0
+- CH13
+0x0
+- CH12
+0x0
+- CH11
+0x0
+- CH10
+0x0
+- CH9
+0x0
+- CH8
+0x0
+- CH7
+0x0
+- CH6
+0x0
+- CH5
+0x0
+- CH4
+0x0
+- CH3
+0x0
+- CH2
+0x0
+- CH1
+0x0
+- CH0
+- GPCDMA_COMMON_MASKED_INTR_REG_0
+- Offset: 0x1c
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_DMA_RO_0
+- Reset: 0xffffffff (0b1111,1111,1111,1111,1111,1111,1111,1111)
+- Bit
+- Reset
+- Description
+0x1
+- CH31
+0x1
+- CH30
+0x1
+- CH29
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- CH28
+0x1
+- CH27
+0x1
+- CH26
+0x1
+- CH25
+0x1
+- CH24
+0x1
+- CH23
+0x1
+- CH22
+0x1
+- CH21
+0x1
+- CH20
+0x1
+- CH19
+0x1
+- CH18
+0x1
+- CH17
+0x1
+- CH16
+0x1
+- CH15
+0x1
+- CH14
+0x1
+- CH13
+0x1
+- CH12
+0x1
+- CH11
+0x1
+- CH10
+0x1
+- CH9
+0x1
+- CH8
+0x1
+- CH7
+0x1
+- CH6
+0x1
+- CH5
+0x1
+- CH4
+0x1
+- CH3
+0x1
+- CH2
+0x1
+- CH1
+0x1
+- CH0
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CHANNEL_INTR_STA_0
+- Offset: 0x20
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_DMA_RO_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0
+- CH31
+0x0
+- CH30
+0x0
+- CH29
+0x0
+- CH28
+0x0
+- CH27
+0x0
+- CH26
+0x0
+- CH25
+0x0
+- CH24
+0x0
+- CH23
+0x0
+- CH22
+0x0
+- CH21
+0x0
+- CH20
+0x0
+- CH19
+0x0
+- CH18
+0x0
+- CH17
+0x0
+- CH16
+0x0
+- CH15
+0x0
+- CH14
+0x0
+- CH13
+0x0
+- CH12
+0x0
+- CH11
+0x0
+- CH10
+0x0
+- CH9
+0x0
+- CH8
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0
+- CH7
+0x0
+- CH6
+0x0
+- CH5
+0x0
+- CH4
+0x0
+- CH3
+0x0
+- CH2
+0x0
+- CH1
+0x0
+- CH0
+- GPCDMA_COMMON_COMMON_INTR_0
+- Offset: 0x24
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx0,0000)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0
+- RAW_INTR_STATUS
+- RO
+0x0
+- IRQ_INTR_STATUS
+- RW
+0x0
+- IS_EOC
+- RW
+0x0
+- INTR_MASK
+- RW
+0x0
+- IE_EOC
+- GPCDMA_COMMON_CHANNEL_REG_LOCK_0
+- Offset: 0x28
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- REGLOCK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH0_PERI_ID_MASK_0
+- Offset: 0x80
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH0_PERI_ID_MASK
+- GPCDMA_COMMON_CH1_PERI_ID_MASK_0
+- Offset: 0x84
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH1_PERI_ID_MASK
+- GPCDMA_COMMON_CH2_PERI_ID_MASK_0
+- Offset: 0x88
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH2_PERI_ID_MASK
+- GPCDMA_COMMON_CH3_PERI_ID_MASK_0
+- Offset: 0x8c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH3_PERI_ID_MASK
+- GPCDMA_COMMON_CH4_PERI_ID_MASK_0
+- Offset: 0x90
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH4_PERI_ID_MASK
+- GPCDMA_COMMON_CH5_PERI_ID_MASK_0
+- Offset: 0x94
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH5_PERI_ID_MASK
+- GPCDMA_COMMON_CH6_PERI_ID_MASK_0
+- Offset: 0x98
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH6_PERI_ID_MASK
+- GPCDMA_COMMON_CH7_PERI_ID_MASK_0
+- Offset: 0x9c
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH7_PERI_ID_MASK
+- GPCDMA_COMMON_CH8_PERI_ID_MASK_0
+- Offset: 0xa0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH8_PERI_ID_MASK
+- GPCDMA_COMMON_CH9_PERI_ID_MASK_0
+- Offset: 0xa4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH9_PERI_ID_MASK
+- GPCDMA_COMMON_CH10_PERI_ID_MASK_0
+- Offset: 0xa8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH10_PERI_ID_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH11_PERI_ID_MASK_0
+- Offset: 0xac
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH11_PERI_ID_MASK
+- GPCDMA_COMMON_CH12_PERI_ID_MASK_0
+- Offset: 0xb0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH12_PERI_ID_MASK
+- GPCDMA_COMMON_CH13_PERI_ID_MASK_0
+- Offset: 0xb4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH13_PERI_ID_MASK
+- GPCDMA_COMMON_CH14_PERI_ID_MASK_0
+- Offset: 0xb8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH14_PERI_ID_MASK
+- GPCDMA_COMMON_CH15_PERI_ID_MASK_0
+- Offset: 0xbc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH15_PERI_ID_MASK
+- GPCDMA_COMMON_CH16_PERI_ID_MASK_0
+- Offset: 0xc0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH16_PERI_ID_MASK
+- GPCDMA_COMMON_CH17_PERI_ID_MASK_0
+- Offset: 0xc4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH17_PERI_ID_MASK
+- GPCDMA_COMMON_CH18_PERI_ID_MASK_0
+- Offset: 0xc8
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH18_PERI_ID_MASK
+- GPCDMA_COMMON_CH19_PERI_ID_MASK_0
+- Offset: 0xcc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH19_PERI_ID_MASK
+- GPCDMA_COMMON_CH20_PERI_ID_MASK_0
+- Offset: 0xd0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH20_PERI_ID_MASK
+- GPCDMA_COMMON_CH21_PERI_ID_MASK_0
+- Offset: 0xd4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH21_PERI_ID_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH22_PERI_ID_MASK_0
+- Offset: 0xd8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH22_PERI_ID_MASK
+- GPCDMA_COMMON_CH23_PERI_ID_MASK_0
+- Offset: 0xdc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH23_PERI_ID_MASK
+- GPCDMA_COMMON_CH24_PERI_ID_MASK_0
+- Offset: 0xe0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH24_PERI_ID_MASK
+- GPCDMA_COMMON_CH25_PERI_ID_MASK_0
+- Offset: 0xe4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH25_PERI_ID_MASK
+- GPCDMA_COMMON_CH26_PERI_ID_MASK_0
+- Offset: 0xe8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH26_PERI_ID_MASK
+- GPCDMA_COMMON_CH27_PERI_ID_MASK_0
+- Offset: 0xec
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH27_PERI_ID_MASK
+- GPCDMA_COMMON_CH28_PERI_ID_MASK_0
+- Offset: 0xf0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH28_PERI_ID_MASK
+- GPCDMA_COMMON_CH29_PERI_ID_MASK_0
+- Offset: 0xf4
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH29_PERI_ID_MASK
+- GPCDMA_COMMON_CH30_PERI_ID_MASK_0
+- Offset: 0xf8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH30_PERI_ID_MASK
+- GPCDMA_COMMON_CH31_PERI_ID_MASK_0
+- Offset: 0xfc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH31_PERI_ID_MASK
+- GPCDMA_COMMON_PER0_PERI_ADDR_0
+- Offset: 0x100
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER0_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+15:0 0x0 PER0_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER1_PERI_ADDR_0
+- Offset: 0x104
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER1_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER1_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER2_PERI_ADDR_0
+- Offset: 0x108
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER2_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER2_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER3_PERI_ADDR_0
+- Offset: 0x10c
+- Read/Write: R/W
+- Parity Protection: N
+
+- GPC-DMA Registers
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER3_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER3_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER4_PERI_ADDR_0
+- Offset: 0x110
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER4_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER4_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER5_PERI_ADDR_0
+- Offset: 0x114
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER5_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER5_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_PER6_PERI_ADDR_0
+- Offset: 0x118
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER6_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER6_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER7_PERI_ADDR_0
+- Offset: 0x11c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER7_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER7_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER8_PERI_ADDR_0
+- Offset: 0x120
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:16 0x0 PER8_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER8_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER9_PERI_ADDR_0
+- Offset: 0x124
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER9_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER9_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER10_PERI_ADDR_0
+- Offset: 0x128
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER10_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER10_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER11_PERI_ADDR_0
+
+- GPC-DMA Registers
+- Offset: 0x12c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER11_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER11_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER12_PERI_ADDR_0
+- Offset: 0x130
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER12_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER12_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER13_PERI_ADDR_0
+- Offset: 0x134
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER13_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+15:0 0x0 PER13_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER14_PERI_ADDR_0
+- Offset: 0x138
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER14_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER14_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER15_PERI_ADDR_0
+- Offset: 0x13c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER15_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER15_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER16_PERI_ADDR_0
+- Offset: 0x140
+- Read/Write: R/W
+- Parity Protection: N
+
+- GPC-DMA Registers
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER16_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER16_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER17_PERI_ADDR_0
+- Offset: 0x144
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER17_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER17_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER18_PERI_ADDR_0
+- Offset: 0x148
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER18_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER18_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_PER19_PERI_ADDR_0
+- Offset: 0x14c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER19_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER19_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER20_PERI_ADDR_0
+- Offset: 0x150
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER20_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER20_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER21_PERI_ADDR_0
+- Offset: 0x154
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:16 0x0 PER21_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER21_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER22_PERI_ADDR_0
+- Offset: 0x158
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER22_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER22_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER23_PERI_ADDR_0
+- Offset: 0x15c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER23_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER23_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER24_PERI_ADDR_0
+
+- GPC-DMA Registers
+- Offset: 0x160
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER24_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER24_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER25_PERI_ADDR_0
+- Offset: 0x164
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER25_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER25_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER26_PERI_ADDR_0
+- Offset: 0x168
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER26_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+15:0 0x0 PER26_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER27_PERI_ADDR_0
+- Offset: 0x16c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER27_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER27_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER28_PERI_ADDR_0
+- Offset: 0x170
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER28_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER28_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER29_PERI_ADDR_0
+- Offset: 0x174
+- Read/Write: R/W
+- Parity Protection: N
+
+- GPC-DMA Registers
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER29_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER29_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER30_PERI_ADDR_0
+- Offset: 0x178
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER30_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER30_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+- GPCDMA_COMMON_PER31_PERI_ADDR_0
+- Offset: 0x17c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: GPCDMA_SCR_SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:16 0x0 PER31_PERI_START_ADDR:
+- PeripheralX start address set by Hypervisor (upper 16 address bits @
+64K boundary). If base address is set to zero then no address checking is done 15:0 0x0 PER31_PERI_OFFSET:
+- PeripheralX range size set by Hypervisor (address offset)
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH0_STREAM_ID0_MASK_0
+- Offset: 0x180
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH0_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH1_STREAM_ID0_MASK_0
+- Offset: 0x184
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH1_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH2_STREAM_ID0_MASK_0
+- Offset: 0x188
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH2_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH3_STREAM_ID0_MASK_0
+- Offset: 0x18c
+- Read/Write: R/W
+- Parity Protection: N
+
+- GPC-DMA Registers
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH3_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH4_STREAM_ID0_MASK_0
+- Offset: 0x190
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH4_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH5_STREAM_ID0_MASK_0
+- Offset: 0x194
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH5_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH6_STREAM_ID0_MASK_0
+- Offset: 0x198
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH6_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH7_STREAM_ID0_MASK_0
+
+- GPC-DMA Registers
+- Offset: 0x19c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH7_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH8_STREAM_ID0_MASK_0
+- Offset: 0x1a0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH8_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH9_STREAM_ID0_MASK_0
+- Offset: 0x1a4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH9_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH10_STREAM_ID0_MASK_0
+- Offset: 0x1a8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH10_STREAM_ID0_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH11_STREAM_ID0_MASK_0
+- Offset: 0x1ac
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH11_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH12_STREAM_ID0_MASK_0
+- Offset: 0x1b0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH12_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH13_STREAM_ID0_MASK_0
+- Offset: 0x1b4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH13_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH14_STREAM_ID0_MASK_0
+- Offset: 0x1b8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH14_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH15_STREAM_ID0_MASK_0
+- Offset: 0x1bc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH15_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH16_STREAM_ID0_MASK_0
+- Offset: 0x1c0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH16_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH17_STREAM_ID0_MASK_0
+- Offset: 0x1c4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH17_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH18_STREAM_ID0_MASK_0
+- Offset: 0x1c8
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH18_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH19_STREAM_ID0_MASK_0
+- Offset: 0x1cc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH19_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH20_STREAM_ID0_MASK_0
+- Offset: 0x1d0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH20_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH21_STREAM_ID0_MASK_0
+- Offset: 0x1d4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH21_STREAM_ID0_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH22_STREAM_ID0_MASK_0
+- Offset: 0x1d8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH22_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH23_STREAM_ID0_MASK_0
+- Offset: 0x1dc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH23_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH24_STREAM_ID0_MASK_0
+- Offset: 0x1e0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH24_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH25_STREAM_ID0_MASK_0
+- Offset: 0x1e4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH25_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH26_STREAM_ID0_MASK_0
+- Offset: 0x1e8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH26_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH27_STREAM_ID0_MASK_0
+- Offset: 0x1ec
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH27_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH28_STREAM_ID0_MASK_0
+- Offset: 0x1f0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH28_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH29_STREAM_ID0_MASK_0
+- Offset: 0x1f4
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH29_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH30_STREAM_ID0_MASK_0
+- Offset: 0x1f8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH30_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH31_STREAM_ID0_MASK_0
+- Offset: 0x1fc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH31_STREAM_ID0_MASK
+- GPCDMA_COMMON_CH0_STREAM_ID1_MASK_0
+- Offset: 0x200
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH0_STREAM_ID1_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH1_STREAM_ID1_MASK_0
+- Offset: 0x204
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH1_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH2_STREAM_ID1_MASK_0
+- Offset: 0x208
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH2_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH3_STREAM_ID1_MASK_0
+- Offset: 0x20c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH3_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH4_STREAM_ID1_MASK_0
+- Offset: 0x210
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH4_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH5_STREAM_ID1_MASK_0
+- Offset: 0x214
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH5_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH6_STREAM_ID1_MASK_0
+- Offset: 0x218
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH6_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH7_STREAM_ID1_MASK_0
+- Offset: 0x21c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH7_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH8_STREAM_ID1_MASK_0
+- Offset: 0x220
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH8_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH9_STREAM_ID1_MASK_0
+- Offset: 0x224
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH9_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH10_STREAM_ID1_MASK_0
+- Offset: 0x228
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH10_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH11_STREAM_ID1_MASK_0
+- Offset: 0x22c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH11_STREAM_ID1_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH12_STREAM_ID1_MASK_0
+- Offset: 0x230
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH12_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH13_STREAM_ID1_MASK_0
+- Offset: 0x234
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH13_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH14_STREAM_ID1_MASK_0
+- Offset: 0x238
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH14_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH15_STREAM_ID1_MASK_0
+- Offset: 0x23c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH15_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH16_STREAM_ID1_MASK_0
+- Offset: 0x240
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH16_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH17_STREAM_ID1_MASK_0
+- Offset: 0x244
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH17_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH18_STREAM_ID1_MASK_0
+- Offset: 0x248
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH18_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH19_STREAM_ID1_MASK_0
+- Offset: 0x24c
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH19_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH20_STREAM_ID1_MASK_0
+- Offset: 0x250
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH20_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH21_STREAM_ID1_MASK_0
+- Offset: 0x254
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH21_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH22_STREAM_ID1_MASK_0
+- Offset: 0x258
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH22_STREAM_ID1_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH23_STREAM_ID1_MASK_0
+- Offset: 0x25c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH23_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH24_STREAM_ID1_MASK_0
+- Offset: 0x260
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH24_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH25_STREAM_ID1_MASK_0
+- Offset: 0x264
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH25_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH26_STREAM_ID1_MASK_0
+- Offset: 0x268
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH26_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH27_STREAM_ID1_MASK_0
+- Offset: 0x26c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH27_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH28_STREAM_ID1_MASK_0
+- Offset: 0x270
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH28_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH29_STREAM_ID1_MASK_0
+- Offset: 0x274
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH29_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH30_STREAM_ID1_MASK_0
+- Offset: 0x278
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH30_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH31_STREAM_ID1_MASK_0
+- Offset: 0x27c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH31_STREAM_ID1_MASK
+- GPCDMA_COMMON_CH0_STREAM_ID2_MASK_0
+- Offset: 0x280
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH0_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH1_STREAM_ID2_MASK_0
+- Offset: 0x284
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH1_STREAM_ID2_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH2_STREAM_ID2_MASK_0
+- Offset: 0x288
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH2_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH3_STREAM_ID2_MASK_0
+- Offset: 0x28c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH3_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH4_STREAM_ID2_MASK_0
+- Offset: 0x290
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH4_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH5_STREAM_ID2_MASK_0
+- Offset: 0x294
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH5_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH6_STREAM_ID2_MASK_0
+- Offset: 0x298
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH6_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH7_STREAM_ID2_MASK_0
+- Offset: 0x29c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH7_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH8_STREAM_ID2_MASK_0
+- Offset: 0x2a0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH8_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH9_STREAM_ID2_MASK_0
+- Offset: 0x2a4
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH9_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH10_STREAM_ID2_MASK_0
+- Offset: 0x2a8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH10_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH11_STREAM_ID2_MASK_0
+- Offset: 0x2ac
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH11_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH12_STREAM_ID2_MASK_0
+- Offset: 0x2b0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH12_STREAM_ID2_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH13_STREAM_ID2_MASK_0
+- Offset: 0x2b4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH13_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH14_STREAM_ID2_MASK_0
+- Offset: 0x2b8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH14_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH15_STREAM_ID2_MASK_0
+- Offset: 0x2bc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH15_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH16_STREAM_ID2_MASK_0
+- Offset: 0x2c0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH16_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH17_STREAM_ID2_MASK_0
+- Offset: 0x2c4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH17_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH18_STREAM_ID2_MASK_0
+- Offset: 0x2c8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH18_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH19_STREAM_ID2_MASK_0
+- Offset: 0x2cc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH19_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH20_STREAM_ID2_MASK_0
+- Offset: 0x2d0
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH20_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH21_STREAM_ID2_MASK_0
+- Offset: 0x2d4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH21_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH22_STREAM_ID2_MASK_0
+- Offset: 0x2d8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH22_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH23_STREAM_ID2_MASK_0
+- Offset: 0x2dc
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH23_STREAM_ID2_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH24_STREAM_ID2_MASK_0
+- Offset: 0x2e0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH24_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH25_STREAM_ID2_MASK_0
+- Offset: 0x2e4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH25_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH26_STREAM_ID2_MASK_0
+- Offset: 0x2e8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH26_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH27_STREAM_ID2_MASK_0
+- Offset: 0x2ec
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH27_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH28_STREAM_ID2_MASK_0
+- Offset: 0x2f0
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH28_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH29_STREAM_ID2_MASK_0
+- Offset: 0x2f4
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH29_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH30_STREAM_ID2_MASK_0
+- Offset: 0x2f8
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH30_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH31_STREAM_ID2_MASK_0
+- Offset: 0x2fc
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH31_STREAM_ID2_MASK
+- GPCDMA_COMMON_CH0_STREAM_ID3_MASK_0
+- Offset: 0x300
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH0_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH1_STREAM_ID3_MASK_0
+- Offset: 0x304
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH1_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH2_STREAM_ID3_MASK_0
+- Offset: 0x308
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH2_STREAM_ID3_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH3_STREAM_ID3_MASK_0
+- Offset: 0x30c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH3_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH4_STREAM_ID3_MASK_0
+- Offset: 0x310
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH4_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH5_STREAM_ID3_MASK_0
+- Offset: 0x314
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH5_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH6_STREAM_ID3_MASK_0
+- Offset: 0x318
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH6_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH7_STREAM_ID3_MASK_0
+- Offset: 0x31c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH7_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH8_STREAM_ID3_MASK_0
+- Offset: 0x320
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH8_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH9_STREAM_ID3_MASK_0
+- Offset: 0x324
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH9_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH10_STREAM_ID3_MASK_0
+- Offset: 0x328
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH10_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH11_STREAM_ID3_MASK_0
+- Offset: 0x32c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH11_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH12_STREAM_ID3_MASK_0
+- Offset: 0x330
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH12_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH13_STREAM_ID3_MASK_0
+- Offset: 0x334
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH13_STREAM_ID3_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH14_STREAM_ID3_MASK_0
+- Offset: 0x338
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH14_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH15_STREAM_ID3_MASK_0
+- Offset: 0x33c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH15_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH16_STREAM_ID3_MASK_0
+- Offset: 0x340
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH16_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH17_STREAM_ID3_MASK_0
+- Offset: 0x344
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH17_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH18_STREAM_ID3_MASK_0
+- Offset: 0x348
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH18_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH19_STREAM_ID3_MASK_0
+- Offset: 0x34c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH19_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH20_STREAM_ID3_MASK_0
+- Offset: 0x350
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH20_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH21_STREAM_ID3_MASK_0
+- Offset: 0x354
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH21_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH22_STREAM_ID3_MASK_0
+- Offset: 0x358
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH22_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH23_STREAM_ID3_MASK_0
+- Offset: 0x35c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH23_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH24_STREAM_ID3_MASK_0
+- Offset: 0x360
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH24_STREAM_ID3_MASK
+
+- GPC-DMA Registers
+- GPCDMA_COMMON_CH25_STREAM_ID3_MASK_0
+- Offset: 0x364
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH25_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH26_STREAM_ID3_MASK_0
+- Offset: 0x368
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH26_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH27_STREAM_ID3_MASK_0
+- Offset: 0x36c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH27_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH28_STREAM_ID3_MASK_0
+- Offset: 0x370
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH28_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH29_STREAM_ID3_MASK_0
+- Offset: 0x374
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH29_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH30_STREAM_ID3_MASK_0
+- Offset: 0x378
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH30_STREAM_ID3_MASK
+- GPCDMA_COMMON_CH31_STREAM_ID3_MASK_0
+- Offset: 0x37c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- CH31_STREAM_ID3_MASK
+- GPCDMA_COMMON_DMA_CHAN_VIRTUALIZATION_ENABLE_0
+- Offset: 0x380
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: N
+- SCR Protection: SCR_HYPER_0
+- Reset: 0x0 (0b1111,1111,1111,1111,1111,1111,1111,1111)
+- Bit
+- Reset
+- Description
+0x1
+- CH31
+0x1
+- CH30
+0x1
+- CH29
+0x1
+- CH28
+0x1
+- CH27
+0x1
+- CH26
+0x1
+- CH25
+0x1
+- CH24
+0x1
+- CH23
+0x1
+- CH22
+0x1
+- CH21
+0x1
+- CH20
+0x1
+- CH19
+0x1
+- CH18
+0x1
+- CH17
+0x1
+- CH16
+0x1
+- CH15
+0x1
+- CH14
+0x1
+- CH13
+0x1
+- CH12
+0x1
+- CH11
+0x1
+- CH10
+0x1
+- CH9
+0x1
+- CH8
+0x1
+- CH7
+0x1
+- CH6
+0x1
+- CH5
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- CH4
+0x1
+- CH3
+0x1
+- CH2
+0x1
+- CH1
+0x1
+- CH0
+- GPCDMA_COMMON_DMA_ICG_EN_OVERRIDE_0
+- Offset: 0x384
+- Read/Write: R/W
+- Parity Protection: N
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx0)
+- Bit
+- Reset
+- Description
+0x0
+- DMA_ICG_EN_OVERRIDE
+- GPCDMA_COMMON_DMA_ACTIVE_0
+- Offset: 0x388
+- Read/Write: RO
+- Parity Protection: N
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0000)
+- Bit
+- Reset
+- Description
+0x0
+- DMA_IO_ACTIVE
+0x0
+- DMA_MC_ACTIVE
+0x0
+- DMA_IO_MC_ACTIVE
+0x0
+- DMA_ACTIVE
+- GPCDMA_COMMON_SAFETY_LOGIC_CLK_DISABLE_0
+- Offset: 0x390
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_SAFETY_0
+- Reset: 0x00000002 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx10)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+1:0 0x2
+- SAFETY_LOGIC_CLK_DISABLE
+- GPCDMA_ERRCOLLATOR_FEATURE_0
+- Offset: 0xff00
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: EC_SCR_0
+- Reset: 0x000c0001 (0b0000,0000,0000,1100,xxxx,xxxx,xx00,0001)
+- Bit
+- Reset
+- Description
+31:16 0xc NUM_ERR:
+- Number of errors connected to this collator. This is passed as a build
+time option to the plugin 5:0 0x1 NUM_ERR_SLICES:
+- Number of error slices supported by this error collator, does not
+include the GlobalSpace and is derived by CEIL (NUM_ERR/32). Software shall first read this register to determine the number of slices and read the required number of Error_Status registers .
+- GPCDMA_ERRCOLLATOR_SWRESET_0
+- Offset: 0xff04
+- Read/Write: WO
+- Parity Protection: N
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx0)
+- Bit
+- Reset
+- Description
+0x0 SWRST: 1'b1 : Issue a Software reset to the Error Collator. This will reset all the registers (Except SCR), counters and logic of the Error Collator. Software can use this bit to flush errors logged into the error collator for example, after Boot, SC7/8 exit. 1'b0 : Do nothing, reset value. This bit is auto-cleared.
+- GPCDMA_ERRCOLLATOR_MISSIONERR_TYPE_0
+- Offset: 0xff08
+- Read/Write: RO
+- Parity Protection: N
+
+- GPC-DMA Registers
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000005 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00,0101)
+- Bit
+- Reset
+- Description
+5:0 0x5 CODE:
+- This register indicates the fault code of the error line based on the value of
+MISSIONERR_INDEX Register.
+- This can be used by a fault handling agent to triage an error without
+requiring device-specific code. The possible values of this field are: 6'd0 : None 6'd1 : Parity Error on internal data path 6'd2 : ECC SEC Error on internal data path 6'd3 : ECC DED Error on internal data path 6'd4 : Comparator Error 6'd5 : Register Parity Error 6'd6 : Parity Error from on-chip SRAM/FIFO 6'd7 : ECC SEC Error from on-chip SRAM/FIFO 6'd8 : ECC DED Error from on-chip SRAM/FIFO 6'd9 : Clock Monitor Error 6'd10 : Voltage Error 6'd11 : Temperature Error 6'd16 : Software Correctable Error 6'd17 : Software Uncorrectable Error 6'd32 : Other Hardware Correctable Error 6'd33 : Other Hardware Uncorrectable Error All other values : Reserved for future use.
+- GPCDMA_ERRCOLLATOR_CURRENT_COUNTER_VALUE_0
+- Offset: 0xff0c
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxx0,0000,0000)
+- Bit
+- Reset
+- Description
+8:0 0x0 VALUE:
+- Provides the current value of the counter corresponding to the error in
+MissionErr_Index Register. Default provides the value of error 0 counter.
+- Bit[8] is the overflow bit post which the counter saturates and does not
+counter further.
+- GPCDMA_ERRCOLLATOR_MISSIONERR_INDEX_0
+- Offset: 0xff14
+- Read/Write: R/W
+- Parity Protection: Y
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+3:0 0x0 IDX:
+- BINARY Encoded. For error number 32, register should be programmed with
+value 0x20. Write to this register with Error number will update:
+- MISSIONERR_TYPE Register with the Error-Code for the Error.
+- CURRENT_COUNTER_VALUE Register with the error's SEC/DED Counter.
+- MISSIONERR_USERVALUE with value of the first error_<i>_user signal.
+Software can use this to triage the error.
+- The number shall update the MISSIONERR_TYPE register with the error code
+and the Current_Counter_Value register with the value of the errors SEC/DED counter. Software can use this register to triage the error.
+- GPCDMA_ERRCOLLATOR_CORRECTABLE_THRESHOLD_0
+- Offset: 0xff18
+- Read/Write: R/W
+- Parity Protection: Y
+- SCR Protection: EC_SCR_0
+- Reset: 0x000000ff (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,1111,1111)
+- Bit
+- Reset
+- Description
+7:0 0xff COUNT:
+- Threshold value for all SEC Fault Reporting Units connected to this error
+collator.
+- SEC Errors are logged once the threshold is reached and the overflow bit
+is set. 7'b0 : Log SEC error after receiving 1 Error. 7'b1 : Log SEC error after receiving 2 Errors. ... 7'bFF : Log SEC error after receiving 256 Errors.
+- GPCDMA_ERRCOLLATOR_MISSIONERR_INJECT_UNLOCK_0
+- Offset: 0xff1c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+7:0 0x0 VALUE:
+- Writes to ERRSLICE_XXX_MISSIONERR_INJECT registers are disabled until
+this register is written with a value of 0xE1.
+- This is to prevent an inadvertent safety error injection in the safety plugin
+due to: 1. A fault on ERRSLICE_XXX_MISSIONERR_INJECT register itself. 2. Erroneous Software.
+- The register shall be written with a value of 0x0 to reestablish the lock after
+user has completed the error injection testing. 0xE1: Unlock the MISSIONERR_INJECT Register 0x0: Lock the MISSIONERR_INJECT Register 0 = LOCK 225 = UNLOCK
+- GPCDMA_ERRCOLLATOR_ERRSLICE0_MISSIONERR_ENABLE_0
+- Offset: 0xff30
+- Read/Write: R/W
+- Parity Protection: Y
+- SCR Protection: EC_SCR_0
+- Reset: 0x00001fff (0bxxxx,xxxx,xxxx,xxxx,xxx1,1111,1111,1111)
+- Bit
+- Reset
+- Description
+0x1 ERR12: 1'b1 -> Enable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis 1'b0 -> Disable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis 0 = DISABLE 1 = ENABLE 0x1 ERR11: 1'b1 -> Enable Mission Error Reporting for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap 1'b0 -> Disable Mission Error Reporting for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap 0 = DISABLE 1 = ENABLE 0x1 ERR10: 1'b1 -> Enable Mission Error Reporting for ECC DED Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+1'b0 -> Disable Mission Error Reporting for ECC DED Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+0 = DISABLE 1 = ENABLE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1 ERR9: 1'b1 -> Enable Mission Error Reporting for ECC DED Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+1'b0 -> Disable Mission Error Reporting for ECC DED Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+0 = DISABLE 1 = ENABLE 0x1 ERR8: 1'b1 -> Enable Mission Error Reporting for ECC SEC Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+1'b0 -> Disable Mission Error Reporting for ECC SEC Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+0 = DISABLE 1 = ENABLE 0x1 ERR7: 1'b1 -> Enable Mission Error Reporting for ECC SEC Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+1'b0 -> Disable Mission Error Reporting for ECC SEC Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+0 = DISABLE 1 = ENABLE 0x1 ERR6: 1'b1 -> Enable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf 1'b0 -> Disable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf 0 = DISABLE 1 = ENABLE 0x1 ERR5: 1'b1 -> Enable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity 1'b0 -> Disable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity 0 = DISABLE 1 = ENABLE 0x1 ERR4: 1'b1 -> Enable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus 1'b0 -> Disable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus 0 = DISABLE 1 = ENABLE 0x1 ERR3: 1'b1 -> Enable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap 1'b0 -> Disable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap 0 = DISABLE 1 = ENABLE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1 ERR2: 1'b1 -> Enable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi 1'b0 -> Disable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi 0 = DISABLE 1 = ENABLE 0x1 ERR1: 1'b1 -> Enable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi 1'b0 -> Disable Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi 0 = DISABLE 1 = ENABLE 0x1 ERR0: 1'b1 -> Enable Mission Error Reporting for Register Parity Error from
+- NV_GPCDMA_err_collator
+1'b0 -> Disable Mission Error Reporting for Register Parity Error from
+- NV_GPCDMA_err_collator
+0 = DISABLE 1 = ENABLE
+- GPCDMA_ERRCOLLATOR_ERRSLICE0_MISSIONERR_FORCE_0
+- Offset: 0xff34
+- Read/Write: WO
+- Parity Protection: N
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxx0,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 ERR12: 1'b1 -> Force Assertion of Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR11: 1'b1 -> Force Assertion of Mission Error Reporting for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0 ERR10: 1'b1 -> Force Assertion of Mission Error Reporting for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR9: 1'b1 -> Force Assertion of Mission Error Reporting for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR8: 1'b1 -> Force Assertion of Mission Error Reporting for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR7: 1'b1 -> Force Assertion of Mission Error Reporting for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR6: 1'b1 -> Force Assertion of Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR5: 1'b1 -> Force Assertion of Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR4: 1'b1 -> Force Assertion of Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR3: 1'b1 -> Force Assertion of Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0 ERR2: 1'b1 -> Force Assertion of Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR1: 1'b1 -> Force Assertion of Mission Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR0: 1'b1 -> Force Assertion of Mission Error Reporting for Register Parity Error from NV_GPCDMA_err_collator 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE
+- GPCDMA_ERRCOLLATOR_ERRSLICE0_MISSIONERR_STATUS_0
+Software must write 1 to clear the fields of this register. Bits in this register continue to be logged independent of the value of MissionError_Enable register, to avoid silent dropping of errors.
+- Offset: 0xff38
+- Read/Write: R/W
+- Parity Protection: Y
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxx0,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 ERR12: 1'b1 -> Error_12_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis was equal to 2'b10. 1'b0 -> Error_12_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis was equal to 2'b01. 0x0 ERR11: 1'b1 -> Error_11_pulse[1:0] for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap was equal to 2'b10. 1'b0 -> Error_11_pulse[1:0] for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap was equal to 2'b01. 0x0 ERR10: 1'b1 -> Error_10_pulse[1:0] for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b10. 1'b0 -> Error_10_pulse[1:0] for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b01.
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0 ERR9: 1'b1 -> Error_9_pulse[1:0] for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b10. 1'b0 -> Error_9_pulse[1:0] for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b01. 0x0 ERR8: 1'b1 -> Error_8_pulse[1:0] for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b10. 1'b0 -> Error_8_pulse[1:0] for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b01. 0x0 ERR7: 1'b1 -> Error_7_pulse[1:0] for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b10. 1'b0 -> Error_7_pulse[1:0] for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b01. 0x0 ERR6: 1'b1 -> Error_6_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf was equal to 2'b10. 1'b0 -> Error_6_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf was equal to 2'b01. 0x0 ERR5: 1'b1 -> Error_5_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity was equal to 2'b10. 1'b0 -> Error_5_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity was equal to 2'b01. 0x0 ERR4: 1'b1 -> Error_4_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus was equal to 2'b10. 1'b0 -> Error_4_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus was equal to 2'b01. 0x0 ERR3: 1'b1 -> Error_3_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap was equal to 2'b10. 1'b0 -> Error_3_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap was equal to 2'b01. 0x0 ERR2: 1'b1 -> Error_2_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi was equal to 2'b10. 1'b0 -> Error_2_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi was equal to 2'b01. 0x0 ERR1: 1'b1 -> Error_1_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi was equal to 2'b10. 1'b0 -> Error_1_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi was equal to 2'b01. 0x0 ERR0: 1'b1 -> Error_0_pulse[1:0] for Register Parity Error from NV_GPCDMA_err_collator was equal to 2'b10. 1'b0 -> Error_0_pulse[1:0] for Register Parity Error from NV_GPCDMA_err_collator was equal to 2'b01.
+
+- GPC-DMA Registers
+- GPCDMA_ERRCOLLATOR_ERRSLICE0_MISSIONERR_INJECT_0
+- Offset: 0xff3c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxx0,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 ERR12: 1'b1 -> Assert the inject_error_12 output for Comparator Error to sys0_0.u_NV_gpcdma.u_regwrap.clkdis to allow for error injection. 1'b0 -> De-Assert inject_error_12 output. 0 = DISABLE 1 = ENABLE 0x0 ERR11: 1'b1 -> Assert the inject_error_11 output for Register Parity Error to sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap to allow for error injection. 1'b0 -> De-Assert inject_error_11 output. 0 = DISABLE 1 = ENABLE 0x0 ERR10: 1'b1 -> Assert the inject_error_10 output for ECC DED Error from on-chip SRAM/FIFO to sys0_0.u_NV_gpcdma.u_ramwrap to allow for error injection. 1'b0 -> De-Assert inject_error_10 output. 0 = DISABLE 1 = ENABLE 0x0 ERR9: 1'b1 -> Assert the inject_error_9 output for ECC DED Error from on-chip SRAM/FIFO to sys0_0.u_NV_gpcdma.u_ramwrap to allow for error injection. 1'b0 -> De-Assert inject_error_9 output. 0 = DISABLE 1 = ENABLE 0x0 ERR8: 1'b1 -> Assert the inject_error_8 output for ECC SEC Error from on-chip SRAM/FIFO to sys0_0.u_NV_gpcdma.u_ramwrap to allow for error injection. 1'b0 -> De-Assert inject_error_8 output. 0 = DISABLE 1 = ENABLE 0x0 ERR7: 1'b1 -> Assert the inject_error_7 output for ECC SEC Error from on-chip SRAM/FIFO to sys0_0.u_NV_gpcdma.u_ramwrap to allow for error injection. 1'b0 -> De-Assert inject_error_7 output. 0 = DISABLE 1 = ENABLE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0 ERR6: 1'b1 -> Assert the inject_error_6 output for Comparator Error to sys0_0.u_NV_gpcdma.u_ramintf to allow for error injection. 1'b0 -> De-Assert inject_error_6 output. 0 = DISABLE 1 = ENABLE 0x0 ERR5: 1'b1 -> Assert the inject_error_5 output for Comparator Error to sys0_0.u_NV_gpcdma.u_regwrap.activity to allow for error injection. 1'b0 -> De-Assert inject_error_5 output. 0 = DISABLE 1 = ENABLE 0x0 ERR4: 1'b1 -> Assert the inject_error_4 output for Comparator Error to sys0_0.u_NV_gpcdma.u_regwrap.intbus to allow for error injection. 1'b0 -> De-Assert inject_error_4 output. 0 = DISABLE 1 = ENABLE 0x0 ERR3: 1'b1 -> Assert the inject_error_3 output for Comparator Error to sys0_0.u_NV_gpcdma.u_regwrap to allow for error injection. 1'b0 -> De-Assert inject_error_3 output. 0 = DISABLE 1 = ENABLE 0x0 ERR2: 1'b1 -> Assert the inject_error_2 output for Comparator Error to sys0_0.u_NV_gpcdma.u_io_axi to allow for error injection. 1'b0 -> De-Assert inject_error_2 output. 0 = DISABLE 1 = ENABLE 0x0 ERR1: 1'b1 -> Assert the inject_error_1 output for Comparator Error to sys0_0.u_NV_gpcdma.u_mc_axi to allow for error injection. 1'b0 -> De-Assert inject_error_1 output. 0 = DISABLE 1 = ENABLE 0x0 ERR0: 1'b1 -> Assert the inject_error_0 output for Register Parity Error to NV_GPCDMA_err_collator to allow for error injection. 1'b0 -> De-Assert inject_error_0 output. 0 = DISABLE 1 = ENABLE
+- GPCDMA_ERRCOLLATOR_ERRSLICE0_LATENTERR_ENABLE_0
+- Offset: 0xff40
+- Read/Write: R/W
+
+- GPC-DMA Registers
+- Parity Protection: Y
+- SCR Protection: EC_SCR_0
+- Reset: 0x00001fff (0bxxxx,xxxx,xxxx,xxxx,xxx1,1111,1111,1111)
+- Bit
+- Reset
+- Description
+0x1 ERR12: 1'b1 -> Enable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis 1'b0 -> Disable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis 0 = DISABLE 1 = ENABLE 0x1 ERR11: 1'b1 -> Enable Latent Error Reporting for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap 1'b0 -> Disable Latent Error Reporting for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap 0 = DISABLE 1 = ENABLE 0x1 ERR10: 1'b1 -> Enable Latent Error Reporting for ECC DED Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+1'b0 -> Disable Latent Error Reporting for ECC DED Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+0 = DISABLE 1 = ENABLE 0x1 ERR9: 1'b1 -> Enable Latent Error Reporting for ECC DED Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+1'b0 -> Disable Latent Error Reporting for ECC DED Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+0 = DISABLE 1 = ENABLE 0x1 ERR8: 1'b1 -> Enable Latent Error Reporting for ECC SEC Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+1'b0 -> Disable Latent Error Reporting for ECC SEC Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+0 = DISABLE 1 = ENABLE 0x1 ERR7: 1'b1 -> Enable Latent Error Reporting for ECC SEC Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+1'b0 -> Disable Latent Error Reporting for ECC SEC Error from on-chip
+- SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap
+0 = DISABLE 1 = ENABLE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1 ERR6: 1'b1 -> Enable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf 1'b0 -> Disable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf 0 = DISABLE 1 = ENABLE 0x1 ERR5: 1'b1 -> Enable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity 1'b0 -> Disable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity 0 = DISABLE 1 = ENABLE 0x1 ERR4: 1'b1 -> Enable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus 1'b0 -> Disable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus 0 = DISABLE 1 = ENABLE 0x1 ERR3: 1'b1 -> Enable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap 1'b0 -> Disable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap 0 = DISABLE 1 = ENABLE 0x1 ERR2: 1'b1 -> Enable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi 1'b0 -> Disable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi 0 = DISABLE 1 = ENABLE 0x1 ERR1: 1'b1 -> Enable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi 1'b0 -> Disable Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi 0 = DISABLE 1 = ENABLE 0x1 ERR0: 1'b1 -> Enable Latent Error Reporting for Register Parity Error from
+- NV_GPCDMA_err_collator
+1'b0 -> Disable Latent Error Reporting for Register Parity Error from
+- NV_GPCDMA_err_collator
+0 = DISABLE 1 = ENABLE
+
+- GPC-DMA Registers
+- GPCDMA_ERRCOLLATOR_ERRSLICE0_LATENTERR_FORCE_0
+- Offset: 0xff44
+- Read/Write: WO
+- Parity Protection: N
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxx0,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 ERR12: 1'b1 -> Force Assertion of Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR11: 1'b1 -> Force Assertion of Latent Error Reporting for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR10: 1'b1 -> Force Assertion of Latent Error Reporting for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR9: 1'b1 -> Force Assertion of Latent Error Reporting for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR8: 1'b1 -> Force Assertion of Latent Error Reporting for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR7: 1'b1 -> Force Assertion of Latent Error Reporting for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0 ERR6: 1'b1 -> Force Assertion of Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR5: 1'b1 -> Force Assertion of Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR4: 1'b1 -> Force Assertion of Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR3: 1'b1 -> Force Assertion of Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR2: 1'b1 -> Force Assertion of Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR1: 1'b1 -> Force Assertion of Latent Error Reporting for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR0: 1'b1 -> Force Assertion of Latent Error Reporting for Register Parity Error from NV_GPCDMA_err_collator 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE
+- GPCDMA_ERRCOLLATOR_ERRSLICE0_LATENTERR_STATUS_0
+Software must write 1 to clear the fields of this register. Bits in this register continue to be logged independent of the value of LatentError_Enable register,
+
+- GPC-DMA Registers
+to avoid silent dropping of errors.
+- Offset: 0xff48
+- Read/Write: R/W
+- Parity Protection: Y
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxx0,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 ERR12: 1'b1 -> Error_12_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis was equal to 2'b00 or 2'b11. 1'b0 -> Error_12_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR11: 1'b1 -> Error_11_pulse[1:0] for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap was equal to 2'b00 or 2'b11. 1'b0 -> Error_11_pulse[1:0] for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR10: 1'b1 -> Error_10_pulse[1:0] for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b00 or 2'b11. 1'b0 -> Error_10_pulse[1:0] for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR9: 1'b1 -> Error_9_pulse[1:0] for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b00 or 2'b11. 1'b0 -> Error_9_pulse[1:0] for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR8: 1'b1 -> Error_8_pulse[1:0] for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b00 or 2'b11. 1'b0 -> Error_8_pulse[1:0] for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR7: 1'b1 -> Error_7_pulse[1:0] for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b00 or 2'b11. 1'b0 -> Error_7_pulse[1:0] for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR6: 1'b1 -> Error_6_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf was equal to 2'b00 or 2'b11. 1'b0 -> Error_6_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf was equal to 2'b01 or 2'b10, but no latent error.
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0 ERR5: 1'b1 -> Error_5_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity was equal to 2'b00 or 2'b11. 1'b0 -> Error_5_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR4: 1'b1 -> Error_4_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus was equal to 2'b00 or 2'b11. 1'b0 -> Error_4_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR3: 1'b1 -> Error_3_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap was equal to 2'b00 or 2'b11. 1'b0 -> Error_3_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR2: 1'b1 -> Error_2_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi was equal to 2'b00 or 2'b11. 1'b0 -> Error_2_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR1: 1'b1 -> Error_1_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi was equal to 2'b00 or 2'b11. 1'b0 -> Error_1_pulse[1:0] for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR0: 1'b1 -> Error_0_pulse[1:0] for Register Parity Error from NV_GPCDMA_err_collator was equal to 2'b00 or 2'b11. 1'b0 -> Error_0_pulse[1:0] for Register Parity Error from NV_GPCDMA_err_collator was equal to 2'b01 or 2'b10, but no latent error.
+- GPCDMA_ERRCOLLATOR_ERRSLICE0_COUNTER_RELOAD_0
+- Offset: 0xff50
+- Read/Write: WO
+- Parity Protection: N
+- SCR Protection: EC_SCR_0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxx0,0000,0000,0000)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0 ERR12: 1'b1 -> Reload Error Counter for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.clkdis 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR11: 1'b1 -> Reload Error Counter for Register Parity Error from sys0_0.u_NV_gpcdma.u_safety_plugins.u_err_collator_scrwrap 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR10: 1'b1 -> Reload Error Counter for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR9: 1'b1 -> Reload Error Counter for ECC DED Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR8: 1'b1 -> Reload Error Counter for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR7: 1'b1 -> Reload Error Counter for ECC SEC Error from on-chip SRAM/FIFO from sys0_0.u_NV_gpcdma.u_ramwrap 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR6: 1'b1 -> Reload Error Counter for Comparator Error from sys0_0.u_NV_gpcdma.u_ramintf 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR5: 1'b1 -> Reload Error Counter for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.activity 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0 ERR4: 1'b1 -> Reload Error Counter for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap.intbus 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR3: 1'b1 -> Reload Error Counter for Comparator Error from sys0_0.u_NV_gpcdma.u_regwrap 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR2: 1'b1 -> Reload Error Counter for Comparator Error from sys0_0.u_NV_gpcdma.u_io_axi 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR1: 1'b1 -> Reload Error Counter for Comparator Error from sys0_0.u_NV_gpcdma.u_mc_axi 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR0: 1'b1 -> Reload Error Counter for Register Parity Error from
+- NV_GPCDMA_err_collator
+1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD
+#### 3.5.4.2 CHANNEL Registers
+- GPCDMA_CHANNEL_CH0_CSR_0
+- Offset: 0x10000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 6 = FIXED_PAT 20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH0_STA_0
+- Offset: 0x10004
+- Read/Write: See table below
+- Parity Protection: N
+
+- GPC-DMA Registers
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH0_CSRE_0
+- Offset: 0x10008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH0_SRC_PTR_0
+- Offset: 0x1000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH0_DST_PTR_0
+- Offset: 0x10010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH0_HI_ADR_PTR_0
+- Offset: 0x10014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH0_MC_SEQ_0
+- Offset: 0x10018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH0_MMIO_SEQ_0
+- Offset: 0x1001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH0_WCOUNT_0
+- Offset: 0x10020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH0_DMA_WORD_TRA_0
+- Offset: 0x10024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH0_DMA_WORD_STA_0
+- Offset: 0x10028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH0_ERR_STA_0
+- Offset: 0x10030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH0_FIXED_PAT_0
+- Offset: 0x10034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH0_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH0_TZ_0
+- Offset: 0x10038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH1_CSR_0
+- Offset: 0x20000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH1_STA_0
+- Offset: 0x20004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH1_CSRE_0
+- Offset: 0x20008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH1_SRC_PTR_0
+- Offset: 0x2000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH1_DST_PTR_0
+- Offset: 0x20010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH1_HI_ADR_PTR_0
+- Offset: 0x20014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH1_MC_SEQ_0
+- Offset: 0x20018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH1_MMIO_SEQ_0
+- Offset: 0x2001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH1_WCOUNT_0
+- Offset: 0x20020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH1_DMA_WORD_TRA_0
+- Offset: 0x20024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH1_DMA_WORD_STA_0
+- Offset: 0x20028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH1_ERR_STA_0
+- Offset: 0x20030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH1_FIXED_PAT_0
+- Offset: 0x20034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH1_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH1_TZ_0
+- Offset: 0x20038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH2_CSR_0
+- Offset: 0x30000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH2_STA_0
+- Offset: 0x30004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH2_CSRE_0
+- Offset: 0x30008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH2_SRC_PTR_0
+- Offset: 0x3000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH2_DST_PTR_0
+- Offset: 0x30010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH2_HI_ADR_PTR_0
+- Offset: 0x30014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH2_MC_SEQ_0
+- Offset: 0x30018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH2_MMIO_SEQ_0
+- Offset: 0x3001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH2_WCOUNT_0
+- Offset: 0x30020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH2_DMA_WORD_TRA_0
+- Offset: 0x30024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH2_DMA_WORD_STA_0
+- Offset: 0x30028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH2_ERR_STA_0
+- Offset: 0x30030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH2_FIXED_PAT_0
+- Offset: 0x30034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH2_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH2_TZ_0
+- Offset: 0x30038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH3_CSR_0
+- Offset: 0x40000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH3_STA_0
+- Offset: 0x40004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH3_CSRE_0
+- Offset: 0x40008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH3_SRC_PTR_0
+- Offset: 0x4000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH3_DST_PTR_0
+- Offset: 0x40010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH3_HI_ADR_PTR_0
+- Offset: 0x40014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH3_MC_SEQ_0
+- Offset: 0x40018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH3_MMIO_SEQ_0
+- Offset: 0x4001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH3_WCOUNT_0
+- Offset: 0x40020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH3_DMA_WORD_TRA_0
+- Offset: 0x40024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH3_DMA_WORD_STA_0
+- Offset: 0x40028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH3_ERR_STA_0
+- Offset: 0x40030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH3_FIXED_PAT_0
+- Offset: 0x40034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH3_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH3_TZ_0
+- Offset: 0x40038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH4_CSR_0
+- Offset: 0x50000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH4_STA_0
+- Offset: 0x50004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH4_CSRE_0
+- Offset: 0x50008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH4_SRC_PTR_0
+- Offset: 0x5000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH4_DST_PTR_0
+- Offset: 0x50010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH4_HI_ADR_PTR_0
+- Offset: 0x50014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH4_MC_SEQ_0
+- Offset: 0x50018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH4_MMIO_SEQ_0
+- Offset: 0x5001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH4_WCOUNT_0
+- Offset: 0x50020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH4_DMA_WORD_TRA_0
+- Offset: 0x50024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH4_DMA_WORD_STA_0
+- Offset: 0x50028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH4_ERR_STA_0
+- Offset: 0x50030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH4_FIXED_PAT_0
+- Offset: 0x50034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH4_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH4_TZ_0
+- Offset: 0x50038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH5_CSR_0
+- Offset: 0x60000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH5_STA_0
+- Offset: 0x60004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH5_CSRE_0
+- Offset: 0x60008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH5_SRC_PTR_0
+- Offset: 0x6000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH5_DST_PTR_0
+- Offset: 0x60010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH5_HI_ADR_PTR_0
+- Offset: 0x60014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH5_MC_SEQ_0
+- Offset: 0x60018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH5_MMIO_SEQ_0
+- Offset: 0x6001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH5_WCOUNT_0
+- Offset: 0x60020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH5_DMA_WORD_TRA_0
+- Offset: 0x60024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH5_DMA_WORD_STA_0
+- Offset: 0x60028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH5_ERR_STA_0
+- Offset: 0x60030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH5_FIXED_PAT_0
+- Offset: 0x60034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH5_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH5_TZ_0
+- Offset: 0x60038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH6_CSR_0
+- Offset: 0x70000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH6_STA_0
+- Offset: 0x70004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH6_CSRE_0
+- Offset: 0x70008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH6_SRC_PTR_0
+- Offset: 0x7000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH6_DST_PTR_0
+- Offset: 0x70010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH6_HI_ADR_PTR_0
+- Offset: 0x70014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH6_MC_SEQ_0
+- Offset: 0x70018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH6_MMIO_SEQ_0
+- Offset: 0x7001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH6_WCOUNT_0
+- Offset: 0x70020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH6_DMA_WORD_TRA_0
+- Offset: 0x70024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH6_DMA_WORD_STA_0
+- Offset: 0x70028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH6_ERR_STA_0
+- Offset: 0x70030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH6_FIXED_PAT_0
+- Offset: 0x70034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH6_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH6_TZ_0
+- Offset: 0x70038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH7_CSR_0
+- Offset: 0x80000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH7_STA_0
+- Offset: 0x80004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH7_CSRE_0
+- Offset: 0x80008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH7_SRC_PTR_0
+- Offset: 0x8000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH7_DST_PTR_0
+- Offset: 0x80010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH7_HI_ADR_PTR_0
+- Offset: 0x80014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH7_MC_SEQ_0
+- Offset: 0x80018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH7_MMIO_SEQ_0
+- Offset: 0x8001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH7_WCOUNT_0
+- Offset: 0x80020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH7_DMA_WORD_TRA_0
+- Offset: 0x80024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH7_DMA_WORD_STA_0
+- Offset: 0x80028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH7_ERR_STA_0
+- Offset: 0x80030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH7_FIXED_PAT_0
+- Offset: 0x80034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH7_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH7_TZ_0
+- Offset: 0x80038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH8_CSR_0
+- Offset: 0x90000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH8_STA_0
+- Offset: 0x90004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH8_CSRE_0
+- Offset: 0x90008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH8_SRC_PTR_0
+- Offset: 0x9000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH8_DST_PTR_0
+- Offset: 0x90010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH8_HI_ADR_PTR_0
+- Offset: 0x90014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH8_MC_SEQ_0
+- Offset: 0x90018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH8_MMIO_SEQ_0
+- Offset: 0x9001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH8_WCOUNT_0
+- Offset: 0x90020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH8_DMA_WORD_TRA_0
+- Offset: 0x90024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH8_DMA_WORD_STA_0
+- Offset: 0x90028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH8_ERR_STA_0
+- Offset: 0x90030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH8_FIXED_PAT_0
+- Offset: 0x90034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH8_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH8_TZ_0
+- Offset: 0x90038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH9_CSR_0
+- Offset: 0xa0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH9_STA_0
+- Offset: 0xa0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH9_CSRE_0
+- Offset: 0xa0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH9_SRC_PTR_0
+- Offset: 0xa000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH9_DST_PTR_0
+- Offset: 0xa0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH9_HI_ADR_PTR_0
+- Offset: 0xa0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH9_MC_SEQ_0
+- Offset: 0xa0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH9_MMIO_SEQ_0
+- Offset: 0xa001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH9_WCOUNT_0
+- Offset: 0xa0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH9_DMA_WORD_TRA_0
+- Offset: 0xa0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH9_DMA_WORD_STA_0
+- Offset: 0xa0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH9_ERR_STA_0
+- Offset: 0xa0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH9_FIXED_PAT_0
+- Offset: 0xa0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH9_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH9_TZ_0
+- Offset: 0xa0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH10_CSR_0
+- Offset: 0xb0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH10_STA_0
+- Offset: 0xb0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH10_CSRE_0
+- Offset: 0xb0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH10_SRC_PTR_0
+- Offset: 0xb000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH10_DST_PTR_0
+- Offset: 0xb0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH10_HI_ADR_PTR_0
+- Offset: 0xb0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH10_MC_SEQ_0
+- Offset: 0xb0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH10_MMIO_SEQ_0
+- Offset: 0xb001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH10_WCOUNT_0
+- Offset: 0xb0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH10_DMA_WORD_TRA_0
+- Offset: 0xb0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH10_DMA_WORD_STA_0
+- Offset: 0xb0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH10_ERR_STA_0
+- Offset: 0xb0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH10_FIXED_PAT_0
+- Offset: 0xb0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH10_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH10_TZ_0
+- Offset: 0xb0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH11_CSR_0
+- Offset: 0xc0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH11_STA_0
+- Offset: 0xc0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH11_CSRE_0
+- Offset: 0xc0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH11_SRC_PTR_0
+- Offset: 0xc000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH11_DST_PTR_0
+- Offset: 0xc0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH11_HI_ADR_PTR_0
+- Offset: 0xc0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH11_MC_SEQ_0
+- Offset: 0xc0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH11_MMIO_SEQ_0
+- Offset: 0xc001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH11_WCOUNT_0
+- Offset: 0xc0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH11_DMA_WORD_TRA_0
+- Offset: 0xc0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH11_DMA_WORD_STA_0
+- Offset: 0xc0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH11_ERR_STA_0
+- Offset: 0xc0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH11_FIXED_PAT_0
+- Offset: 0xc0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH11_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH11_TZ_0
+- Offset: 0xc0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH12_CSR_0
+- Offset: 0xd0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH12_STA_0
+- Offset: 0xd0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH12_CSRE_0
+- Offset: 0xd0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH12_SRC_PTR_0
+- Offset: 0xd000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH12_DST_PTR_0
+- Offset: 0xd0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH12_HI_ADR_PTR_0
+- Offset: 0xd0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH12_MC_SEQ_0
+- Offset: 0xd0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH12_MMIO_SEQ_0
+- Offset: 0xd001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH12_WCOUNT_0
+- Offset: 0xd0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH12_DMA_WORD_TRA_0
+- Offset: 0xd0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH12_DMA_WORD_STA_0
+- Offset: 0xd0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH12_ERR_STA_0
+- Offset: 0xd0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH12_FIXED_PAT_0
+- Offset: 0xd0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH12_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH12_TZ_0
+- Offset: 0xd0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH13_CSR_0
+- Offset: 0xe0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH13_STA_0
+- Offset: 0xe0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH13_CSRE_0
+- Offset: 0xe0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH13_SRC_PTR_0
+- Offset: 0xe000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH13_DST_PTR_0
+- Offset: 0xe0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH13_HI_ADR_PTR_0
+- Offset: 0xe0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH13_MC_SEQ_0
+- Offset: 0xe0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH13_MMIO_SEQ_0
+- Offset: 0xe001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH13_WCOUNT_0
+- Offset: 0xe0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH13_DMA_WORD_TRA_0
+- Offset: 0xe0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH13_DMA_WORD_STA_0
+- Offset: 0xe0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH13_ERR_STA_0
+- Offset: 0xe0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH13_FIXED_PAT_0
+- Offset: 0xe0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH13_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH13_TZ_0
+- Offset: 0xe0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH14_CSR_0
+- Offset: 0xf0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH14_STA_0
+- Offset: 0xf0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH14_CSRE_0
+- Offset: 0xf0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH14_SRC_PTR_0
+- Offset: 0xf000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH14_DST_PTR_0
+- Offset: 0xf0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH14_HI_ADR_PTR_0
+- Offset: 0xf0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH14_MC_SEQ_0
+- Offset: 0xf0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH14_MMIO_SEQ_0
+- Offset: 0xf001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH14_WCOUNT_0
+- Offset: 0xf0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH14_DMA_WORD_TRA_0
+- Offset: 0xf0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH14_DMA_WORD_STA_0
+- Offset: 0xf0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH14_ERR_STA_0
+- Offset: 0xf0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH14_FIXED_PAT_0
+- Offset: 0xf0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH14_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH14_TZ_0
+- Offset: 0xf0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH15_CSR_0
+- Offset: 0x100000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH15_STA_0
+- Offset: 0x100004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH15_CSRE_0
+- Offset: 0x100008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH15_SRC_PTR_0
+- Offset: 0x10000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH15_DST_PTR_0
+- Offset: 0x100010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH15_HI_ADR_PTR_0
+- Offset: 0x100014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH15_MC_SEQ_0
+- Offset: 0x100018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH15_MMIO_SEQ_0
+- Offset: 0x10001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH15_WCOUNT_0
+- Offset: 0x100020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH15_DMA_WORD_TRA_0
+- Offset: 0x100024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH15_DMA_WORD_STA_0
+- Offset: 0x100028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH15_ERR_STA_0
+- Offset: 0x100030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH15_FIXED_PAT_0
+- Offset: 0x100034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH15_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH15_TZ_0
+- Offset: 0x100038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH16_CSR_0
+- Offset: 0x110000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH16_STA_0
+- Offset: 0x110004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH16_CSRE_0
+- Offset: 0x110008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH16_SRC_PTR_0
+- Offset: 0x11000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH16_DST_PTR_0
+- Offset: 0x110010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH16_HI_ADR_PTR_0
+- Offset: 0x110014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH16_MC_SEQ_0
+- Offset: 0x110018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH16_MMIO_SEQ_0
+- Offset: 0x11001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH16_WCOUNT_0
+- Offset: 0x110020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH16_DMA_WORD_TRA_0
+- Offset: 0x110024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH16_DMA_WORD_STA_0
+- Offset: 0x110028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH16_ERR_STA_0
+- Offset: 0x110030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH16_FIXED_PAT_0
+- Offset: 0x110034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH16_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH16_TZ_0
+- Offset: 0x110038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH17_CSR_0
+- Offset: 0x120000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH17_STA_0
+- Offset: 0x120004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH17_CSRE_0
+- Offset: 0x120008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH17_SRC_PTR_0
+- Offset: 0x12000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH17_DST_PTR_0
+- Offset: 0x120010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH17_HI_ADR_PTR_0
+- Offset: 0x120014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH17_MC_SEQ_0
+- Offset: 0x120018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH17_MMIO_SEQ_0
+- Offset: 0x12001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH17_WCOUNT_0
+- Offset: 0x120020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH17_DMA_WORD_TRA_0
+- Offset: 0x120024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH17_DMA_WORD_STA_0
+- Offset: 0x120028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH17_ERR_STA_0
+- Offset: 0x120030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH17_FIXED_PAT_0
+- Offset: 0x120034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH17_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH17_TZ_0
+- Offset: 0x120038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH18_CSR_0
+- Offset: 0x130000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH18_STA_0
+- Offset: 0x130004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH18_CSRE_0
+- Offset: 0x130008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH18_SRC_PTR_0
+- Offset: 0x13000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH18_DST_PTR_0
+- Offset: 0x130010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH18_HI_ADR_PTR_0
+- Offset: 0x130014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH18_MC_SEQ_0
+- Offset: 0x130018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH18_MMIO_SEQ_0
+- Offset: 0x13001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH18_WCOUNT_0
+- Offset: 0x130020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH18_DMA_WORD_TRA_0
+- Offset: 0x130024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH18_DMA_WORD_STA_0
+- Offset: 0x130028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH18_ERR_STA_0
+- Offset: 0x130030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH18_FIXED_PAT_0
+- Offset: 0x130034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH18_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH18_TZ_0
+- Offset: 0x130038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH19_CSR_0
+- Offset: 0x140000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH19_STA_0
+- Offset: 0x140004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH19_CSRE_0
+- Offset: 0x140008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH19_SRC_PTR_0
+- Offset: 0x14000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH19_DST_PTR_0
+- Offset: 0x140010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH19_HI_ADR_PTR_0
+- Offset: 0x140014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH19_MC_SEQ_0
+- Offset: 0x140018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH19_MMIO_SEQ_0
+- Offset: 0x14001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH19_WCOUNT_0
+- Offset: 0x140020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH19_DMA_WORD_TRA_0
+- Offset: 0x140024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH19_DMA_WORD_STA_0
+- Offset: 0x140028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH19_ERR_STA_0
+- Offset: 0x140030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH19_FIXED_PAT_0
+- Offset: 0x140034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH19_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH19_TZ_0
+- Offset: 0x140038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH20_CSR_0
+- Offset: 0x150000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH20_STA_0
+- Offset: 0x150004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH20_CSRE_0
+- Offset: 0x150008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH20_SRC_PTR_0
+- Offset: 0x15000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH20_DST_PTR_0
+- Offset: 0x150010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH20_HI_ADR_PTR_0
+- Offset: 0x150014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH20_MC_SEQ_0
+- Offset: 0x150018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH20_MMIO_SEQ_0
+- Offset: 0x15001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH20_WCOUNT_0
+- Offset: 0x150020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH20_DMA_WORD_TRA_0
+- Offset: 0x150024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH20_DMA_WORD_STA_0
+- Offset: 0x150028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH20_ERR_STA_0
+- Offset: 0x150030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH20_FIXED_PAT_0
+- Offset: 0x150034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH20_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH20_TZ_0
+- Offset: 0x150038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH21_CSR_0
+- Offset: 0x160000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH21_STA_0
+- Offset: 0x160004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH21_CSRE_0
+- Offset: 0x160008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH21_SRC_PTR_0
+- Offset: 0x16000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH21_DST_PTR_0
+- Offset: 0x160010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH21_HI_ADR_PTR_0
+- Offset: 0x160014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH21_MC_SEQ_0
+- Offset: 0x160018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH21_MMIO_SEQ_0
+- Offset: 0x16001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH21_WCOUNT_0
+- Offset: 0x160020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH21_DMA_WORD_TRA_0
+- Offset: 0x160024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH21_DMA_WORD_STA_0
+- Offset: 0x160028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH21_ERR_STA_0
+- Offset: 0x160030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH21_FIXED_PAT_0
+- Offset: 0x160034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH21_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH21_TZ_0
+- Offset: 0x160038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH22_CSR_0
+- Offset: 0x170000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH22_STA_0
+- Offset: 0x170004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH22_CSRE_0
+- Offset: 0x170008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH22_SRC_PTR_0
+- Offset: 0x17000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH22_DST_PTR_0
+- Offset: 0x170010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH22_HI_ADR_PTR_0
+- Offset: 0x170014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH22_MC_SEQ_0
+- Offset: 0x170018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH22_MMIO_SEQ_0
+- Offset: 0x17001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH22_WCOUNT_0
+- Offset: 0x170020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH22_DMA_WORD_TRA_0
+- Offset: 0x170024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH22_DMA_WORD_STA_0
+- Offset: 0x170028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH22_ERR_STA_0
+- Offset: 0x170030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH22_FIXED_PAT_0
+- Offset: 0x170034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH22_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH22_TZ_0
+- Offset: 0x170038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH23_CSR_0
+- Offset: 0x180000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH23_STA_0
+- Offset: 0x180004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH23_CSRE_0
+- Offset: 0x180008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH23_SRC_PTR_0
+- Offset: 0x18000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH23_DST_PTR_0
+- Offset: 0x180010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH23_HI_ADR_PTR_0
+- Offset: 0x180014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH23_MC_SEQ_0
+- Offset: 0x180018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH23_MMIO_SEQ_0
+- Offset: 0x18001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH23_WCOUNT_0
+- Offset: 0x180020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH23_DMA_WORD_TRA_0
+- Offset: 0x180024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH23_DMA_WORD_STA_0
+- Offset: 0x180028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH23_ERR_STA_0
+- Offset: 0x180030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH23_FIXED_PAT_0
+- Offset: 0x180034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH23_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH23_TZ_0
+- Offset: 0x180038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH24_CSR_0
+- Offset: 0x190000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH24_STA_0
+- Offset: 0x190004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH24_CSRE_0
+- Offset: 0x190008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH24_SRC_PTR_0
+- Offset: 0x19000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH24_DST_PTR_0
+- Offset: 0x190010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH24_HI_ADR_PTR_0
+- Offset: 0x190014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH24_MC_SEQ_0
+- Offset: 0x190018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH24_MMIO_SEQ_0
+- Offset: 0x19001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH24_WCOUNT_0
+- Offset: 0x190020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH24_DMA_WORD_TRA_0
+- Offset: 0x190024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH24_DMA_WORD_STA_0
+- Offset: 0x190028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH24_ERR_STA_0
+- Offset: 0x190030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH24_FIXED_PAT_0
+- Offset: 0x190034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH24_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH24_TZ_0
+- Offset: 0x190038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH25_CSR_0
+- Offset: 0x1a0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH25_STA_0
+- Offset: 0x1a0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH25_CSRE_0
+- Offset: 0x1a0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH25_SRC_PTR_0
+- Offset: 0x1a000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH25_DST_PTR_0
+- Offset: 0x1a0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH25_HI_ADR_PTR_0
+- Offset: 0x1a0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH25_MC_SEQ_0
+- Offset: 0x1a0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH25_MMIO_SEQ_0
+- Offset: 0x1a001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH25_WCOUNT_0
+- Offset: 0x1a0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH25_DMA_WORD_TRA_0
+- Offset: 0x1a0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH25_DMA_WORD_STA_0
+- Offset: 0x1a0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH25_ERR_STA_0
+- Offset: 0x1a0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH25_FIXED_PAT_0
+- Offset: 0x1a0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH25_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH25_TZ_0
+- Offset: 0x1a0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH26_CSR_0
+- Offset: 0x1b0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH26_STA_0
+- Offset: 0x1b0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH26_CSRE_0
+- Offset: 0x1b0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH26_SRC_PTR_0
+- Offset: 0x1b000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH26_DST_PTR_0
+- Offset: 0x1b0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH26_HI_ADR_PTR_0
+- Offset: 0x1b0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH26_MC_SEQ_0
+- Offset: 0x1b0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH26_MMIO_SEQ_0
+- Offset: 0x1b001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH26_WCOUNT_0
+- Offset: 0x1b0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH26_DMA_WORD_TRA_0
+- Offset: 0x1b0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH26_DMA_WORD_STA_0
+- Offset: 0x1b0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH26_ERR_STA_0
+- Offset: 0x1b0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH26_FIXED_PAT_0
+- Offset: 0x1b0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH26_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH26_TZ_0
+- Offset: 0x1b0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH27_CSR_0
+- Offset: 0x1c0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH27_STA_0
+- Offset: 0x1c0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH27_CSRE_0
+- Offset: 0x1c0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH27_SRC_PTR_0
+- Offset: 0x1c000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH27_DST_PTR_0
+- Offset: 0x1c0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH27_HI_ADR_PTR_0
+- Offset: 0x1c0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH27_MC_SEQ_0
+- Offset: 0x1c0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH27_MMIO_SEQ_0
+- Offset: 0x1c001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH27_WCOUNT_0
+- Offset: 0x1c0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH27_DMA_WORD_TRA_0
+- Offset: 0x1c0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH27_DMA_WORD_STA_0
+- Offset: 0x1c0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH27_ERR_STA_0
+- Offset: 0x1c0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH27_FIXED_PAT_0
+- Offset: 0x1c0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH27_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH27_TZ_0
+- Offset: 0x1c0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH28_CSR_0
+- Offset: 0x1d0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH28_STA_0
+- Offset: 0x1d0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH28_CSRE_0
+- Offset: 0x1d0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH28_SRC_PTR_0
+- Offset: 0x1d000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH28_DST_PTR_0
+- Offset: 0x1d0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH28_HI_ADR_PTR_0
+- Offset: 0x1d0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH28_MC_SEQ_0
+- Offset: 0x1d0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH28_MMIO_SEQ_0
+- Offset: 0x1d001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH28_WCOUNT_0
+- Offset: 0x1d0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH28_DMA_WORD_TRA_0
+- Offset: 0x1d0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH28_DMA_WORD_STA_0
+- Offset: 0x1d0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH28_ERR_STA_0
+- Offset: 0x1d0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH28_FIXED_PAT_0
+- Offset: 0x1d0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH28_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH28_TZ_0
+- Offset: 0x1d0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH29_CSR_0
+- Offset: 0x1e0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH29_STA_0
+- Offset: 0x1e0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH29_CSRE_0
+- Offset: 0x1e0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH29_SRC_PTR_0
+- Offset: 0x1e000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH29_DST_PTR_0
+- Offset: 0x1e0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH29_HI_ADR_PTR_0
+- Offset: 0x1e0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH29_MC_SEQ_0
+- Offset: 0x1e0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH29_MMIO_SEQ_0
+- Offset: 0x1e001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH29_WCOUNT_0
+- Offset: 0x1e0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH29_DMA_WORD_TRA_0
+- Offset: 0x1e0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH29_DMA_WORD_STA_0
+- Offset: 0x1e0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH29_ERR_STA_0
+- Offset: 0x1e0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH29_FIXED_PAT_0
+- Offset: 0x1e0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH29_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH29_TZ_0
+- Offset: 0x1e0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH30_CSR_0
+- Offset: 0x1f0000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH30_STA_0
+- Offset: 0x1f0004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH30_CSRE_0
+- Offset: 0x1f0008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH30_SRC_PTR_0
+- Offset: 0x1f000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH30_DST_PTR_0
+- Offset: 0x1f0010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH30_HI_ADR_PTR_0
+- Offset: 0x1f0014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH30_MC_SEQ_0
+- Offset: 0x1f0018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH30_MMIO_SEQ_0
+- Offset: 0x1f001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH30_WCOUNT_0
+- Offset: 0x1f0020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH30_DMA_WORD_TRA_0
+- Offset: 0x1f0024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH30_DMA_WORD_STA_0
+- Offset: 0x1f0028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH30_ERR_STA_0
+- Offset: 0x1f0030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH30_FIXED_PAT_0
+- Offset: 0x1f0034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH30_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH30_TZ_0
+- Offset: 0x1f0038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+- GPCDMA_CHANNEL_CH31_CSR_0
+- Offset: 0x200000
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x08008400 (0b00xx,1x00,0000,0000,1x00,01xx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 ENB: 0 = DISABLE 1 = ENABLE 0x0 IE_EOC: 0 = DISABLE 1 = ENABLE 0x1 ONCE: 0 = CYCLIC_MODE 1 = SINGLE_BLOCK 25:24 0x0 FC_MODE: 0 = NO_MMIO 1 = ONE_MMIO 2 = TWO_MMIO 3 = FOUR_MMIO 23:21 0x0 DMA_MODE: 0 = IO2MEM_NO_FC 1 = IO2MEM_FC 2 = MEM2IO_NO_FC 3 = MEM2IO_FC 4 = MEM2MEM 5 = RSVD 6 = FIXED_PAT
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+20:16 0x0 REQ_SEL: 0 = I2C8 1 = I2C10 2 = UARTG 3 = UARTC 5 = QSPI0 6 = QSPI1 8 = UARTA 9 = UARTB 12 = UARTF 13 = UARTH 15 = SPI1 16 = SPI2 17 = SPI3 19 = UARTD 20 = UARTE 21 = I2C 22 = I2C2 23 = I2C3 24 = I2C5 26 = I2C4 27 = I2C7 30 = I2C6 31 = I2C9 29 = RSVD 0x1 IRQ_MASK: 0 = DISABLE 1 = ENABLE 13:10 0x1
+- WEIGHT
+- GPCDMA_CHANNEL_CH31_STA_0
+- Offset: 0x200004
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0b00x0,0000,0x00,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 BSY: 0 = WAIT 1 = ACTIVE
+- RW
+0x0 ISE_EOC: 0 = NO_INTR 1 = INTR
+- RO
+0x0 PING_PONG_STA: 0 = PING_INTR_STA 1 = PONG_INTR_STA
+- RO
+0x0 DMA_ACTIVITY: 0 = IDLE 1 = BUSY
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RO
+0x0 CHANNEL_PAUSE: 0 = RESUME 1 = PAUSE
+- RO
+0x0 CHANNEL_RX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 CHANNEL_TX: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 IRQ_INTR_STA: 0 = DISABLE 1 = ENABLE
+- RO
+0x0 TRIG_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- RO
+0x0 INTR_STA: 0 = NOT_ACTIVE 1 = ACTIVE
+- GPCDMA_CHANNEL_CH31_CSRE_0
+- Offset: 0x200008
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0b0xxx,xxxx,xxxx,0000,00xx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+0x0 DMA_ACTIVITY: 0 = RESUME 1 = PAUSE
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+19:14 0x0 TRIG_SEL: 1 = SMP_24 2 = SMP_25 3 = SMP_26 4 = SMP_27 5 = XRQ_A 6 = XRQ_B 7 = TMR1 8 = TMR2 9 = CH0 10 = CH1 11 = CH2 12 = CH3 13 = CH4 14 = CH5 15 = CH6 16 = CH7 17 = CH8 18 = CH9 19 = CH10 20 = CH11 21 = CH12 22 = CH13 23 = CH14 24 = CH15 25 = CH16 26 = CH17 27 = CH18 28 = CH19 29 = CH20 30 = CH21 31 = CH22 32 = CH23 33 = CH24 34 = CH25 35 = CH26 36 = CH27 37 = CH28 38 = CH29 39 = CH30 40 = CH31 0 = RSVD
+- GPCDMA_CHANNEL_CH31_SRC_PTR_0
+- Offset: 0x20000c
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- SRC_PTR
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH31_DST_PTR_0
+- Offset: 0x200010
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DST_PTR
+- GPCDMA_CHANNEL_CH31_HI_ADR_PTR_0
+- Offset: 0x200014
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+23:16 0x0
+- HI_DST_PTR
+7:0 0x0
+- HI_SRC_PTR
+- GPCDMA_CHANNEL_CH31_MC_SEQ_0
+- Offset: 0x200018
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x03800000 (0b0000,0011,1000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+0x0 MC_DATA_SWAP: 0 = DISABLE 1 = ENABLE 30:25 0x1
+- MC_REQ_CNT
+24:23 0x3 MC_BURST: 0 = DMA_BURST_2WORDS 3 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+- Reset
+- Description
+22:20 0x0 MC_ADDR_WRAP1: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 19:17 0x0 MC_ADDR_WRAP0: 0 = NO_WRAP 1 = WRAP_0N_32WORDS 2 = WRAP_ON_64WORDS 3 = WRAP_ON_128WORDS 4 = WRAP_ON_256WORDS 5 = WRAP_ON_512WORDS 6 = WRAP_ON_1024WORDS 7 = WRAP_ON_2048WORDS 0x0
+- MC_AXIID
+15:14 0x0
+- MC_PROT
+13:7 0x0
+- STREAMID1
+6:0 0x0
+- STREAMID0
+- GPCDMA_CHANNEL_CH31_MMIO_SEQ_0
+- Offset: 0x20001c
+- Read/Write: See table below
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x2381007f (0b0010,0011,1000,0001,xxxx,xxx0,0111,1111)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 DBL_BUF: 0 = DISABLE 1 = ENABLE 30:28
+- RW
+0x2 MMIO_BUS_WIDTH: 0 = BUS_WIDTH_8 1 = BUS_WIDTH_16 2 = BUS_WIDTH_32
+- RW
+0x0 MMIO_DATA_SWAP: 0 = DISABLE 1 = ENABLE 26:23
+- RW
+0x7 MMIO_BURST: 0 = DMA_BURST_1WORDS 1 = DMA_BURST_2WORDS 3 = DMA_BURST_4WORDS 7 = DMA_BURST_8WORDS 15 = DMA_BURST_16WORDS
+
+- GPC-DMA Registers
+- Bit
+R/W
+- Reset
+- Description
+22:19
+- RO
+0x0 MMIO_MASTER_ID: 0 = RSVD 1 = CCPLEX 2 = CCPLEX_DPMU 3 = BPMP 4 = SPE 5 = SCE 6 = DMA_PER 7 = TSECA 8 = TSECB 9 = JTAGM 10 = CSITE 11 = APE 18:16
+- RW
+0x1 MMIO_ADDR_WRAP: 0 = NO_WRAP 1 = WRAP_0N_1WORDS 2 = WRAP_ON_2WORDS 3 = WRAP_ON_4WORDS 4 = WRAP_ON_8WORDS 5 = WRAP_ON_16WORDS 6 = WRAP_ON_32WORDS 7 = WRAP_ON_64WORDS 8:7
+- RW
+0x0
+- MMIO_PROT
+6:0
+- RO
+0x7f
+- MMIO_CHANNEL_SECURITY
+- GPCDMA_CHANNEL_CH31_WCOUNT_0
+- Offset: 0x200020
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- WCOUNT
+- GPCDMA_CHANNEL_CH31_DMA_WORD_TRA_0
+- Offset: 0x200024
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- TRANSFER_COUNT
+
+- GPC-DMA Registers
+- GPCDMA_CHANNEL_CH31_DMA_WORD_STA_0
+- Offset: 0x200028
+- Read/Write: RO
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- DMA_COUNT
+- GPCDMA_CHANNEL_CH31_ERR_STA_0
+- Offset: 0x200030
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- ERROR_STATUS
+- GPCDMA_CHANNEL_CH31_FIXED_PAT_0
+- Offset: 0x200034
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_CH31_0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0
+- FIXED_PATTERN
+- GPCDMA_CHANNEL_CH31_TZ_0
+- Offset: 0x200038
+- Read/Write: R/W
+- Parity Protection: N
+- SCR Protection: SCR_TZ_0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+
+- System Memory Management Unit (SMMU)
+- Bit
+- Reset
+- Description
+0x1
+- MC_PROT_1
+0x1
+- MMIO_PROT_1
+## 3.6 System Memory Management Unit (SMMU)
+### 3.6.1 Overview
+- The System Memory Management Unit (SMMU) is part of the memory system in the SoC. The
+purpose of the SMMU is to allow the use of virtual addressing for memory accesses by the hardware devices. The SMMU provides address translation, supports a two-stage look-up for hypervisor support, and can apply various controls and protections for memory access. This function is sometimes also referred to as an IOMMU.
+- The SMMU is based on the Arm® MMU-500. This chapter should be read with the Arm
+documentation, in particular the Arm CoreLink™ MMU-500 System Memory Management Unit
+- Arm System Memory Management Unit Architecture Specification, which is necessary in
+understanding the programming model. Refer also to the Memory Subsystem (MSS) chapter of this TRM, where many SMMU related concepts are discussed. For the latest version of the Arm documents, refer to the Arm website: http://infocenter.arm.com/ help/index.jsp
+- Arm CoreLink™ MMU-500 System Memory Management Unit Technical Reference
+- Manual: Document ID Arm DDI 0517E (ID072715)
+- Arm System Memory Management Unit Architecture Specification: Document ID Arm IHI
+0062D.b (ID071415)
+#### 3.6.1.1 SMMU Configuration
+The SoC has three instances of SMMU. One of them serves the real-time requests from display and VI, and is referred to as the ISO MMU (ISO is an abbreviation for isochronous). The other two serve the rest of the SoC client traffic, and are referred to as NISO MMUs. All the SMMU instances are configured to support the following: 64 contexts
+- Stage 1 and Stage 2 translation
+7-bit streamID
+
+- System Memory Management Unit (SMMU)
+128 stream matching groups
+- Eight TBUs in each NISO SMMU and four TBUs in ISO SMMU
+The configuration parameters above may have an effect on registers defined in the Arm System Memory Management Unit Architecture Specification. Revision of the Arm IP used:
+- TBU: r2p2
+- TCU: r2p4
+- For the memory subsystem (MSS) datapath to operate correctly, the following must be
+programmed: AArch32 short descriptors should not be used. The SoC supports only 7-bit StreamIDs, so SMR.MASK[14:7] must be programmed to 'hFF. Program SCTLR.CFRE / SCTLR.CFIE / CR0.GFRE / CR0.GFIE / CR0.GCFGFRE / CR0.GCFGFIE = 1. The stall-fault model is not supported. Program SCTLR.CFCFG = 0. Prefetch must be disabled by setting SMMU_CBn_ACTLR.CPRE = 0.
+#### 3.6.1.2 StreamID
+The StreamID is used to select a context in SMMU that is used for translation. For information on how to map a StreamID to a context, refer to the Arm System Memory Management Unit Architecture Specification. The StreamID can be set by a client on a per-transaction basis. However, this behavior can be overridden by programming the StreamID override registers. The override is applied on a per-client basis for all transactions issued by that client. Refer to the Memory Controller (MC) chapter for client details. The StreamID override registers are part of a separate aperture aligned to 64 KB so that it can be controlled by the hypervisor in a virtualized system.
+
+- Boot and Power Management
+4. Boot and Power Management
+## 3.0 Gsps
+## 3.3 V
+## 3.3 V
+## 3.3 V
+(Provided there is 1 KΩ in-series resistor )
+- No
+~ 2 mA
+- BDDPAUX*
+## 3.3 V
+## 3.3 V Tolerance and Open-drain Operation
+Configure the pad for 3.3 V swing tolerance by enabling the E_IO_HV pad control, i.e. (PADCTL_<padctl_group>_<ball_name>_*.E_IO_HV = 1). Applicable to DD pads when it has to tolerate 3.3 V. Typically, other than the PMIC interface, which is guaranteed to operate at 1.8 V for all the other DD pads pad control field E_IO_HV is set to 1 as Reset default to ensure that they come with 3.3 V tolerance mode. E_IO_HV pad control must be set to 1 before I/O can be pulled to > 1.8 V.
+- Set (PADCTL_<pactcl_group>_<ball_ame>_*.TRISTATE = TRISTATE). Even when the functional
+logic driving Logic 1, the pad is in open drain driver mode and it is floated through an external pull-up. Enabling internal pull-up is ignored by the pad when the E_IO_HV is set though this is not the recommended.
+## 3.1 Gen1 x1 port.
+For Type-A and Micro-AB connectors, VBus and ID pin detection are supported via an external PMIC; for Type-C connectors, CC pins detection and signal muxing are supported via an external port policy controller. For USB 3.2 Gen1 x1 Device Controller, the VBUS detection status is notified via software setting the status register bit in USB PAD Control logic.
+## 3.2 Gen2 x1 ports and their companion USB 2.0 ports, or up to four standalone USB 2.0 ports.
+- The xHCI controller provides mechanisms to communicate with USB 2.0 peripherals, such as
+keyboards, mice, card readers, and USB 3.2 peripherals, such as cameras and storage devices. Orin has an USB 3.2 Device controller that supports a device port, allowing Orin to be accessed from an external host device. The USB 3.2 Device controller supports USB 2.0 or USB 3.2 Gen1 x1 with up to 15 IN and 15 OUT endpoints, where a control endpoint consists of one bidirectional endpoint. The endpoints can be configured by the driver to support transfer types of different device classes such as modem, storage, or input devices.
+- Both the xHCI controller and the USB 3.2 Device controller support USB link power
+managements. Both controllers support remote wake up, wake on connect, wake on disconnect, and wake on over current in all power states, including deep sleep mode. The xHCI Controller and USB 3.2 Device controller are collectively called XUSB internally in
+- NVIDIA to distinguish them from earlier USB 2.0 only controllers. Thus some of register
+and power partition names have reference to XUSB.
+
+- USB Functional Description
+## 3.5 symbol
+4 symbol
+- Latency from RXP/RXN to
+RX_DATA.
+- TDATAEN-DATAREADY
+- DATA_EN inactive to
+- DATA_READY inactive
+50 ns
+- Allow internal pipelined data
+to be sent.
+- TDATAREADY-SLEEP
+- DATA_READY inactive to
+- SLEEP active
+50 ns
+- Transmitter driver clock
+disabled.
+- TSLEEP-IDDQ
+- SLEEP active to IDDQ active
+200 ns
+- Allow internal bias to power
+down.
+- Note: The sequence shows a single edge for SLEEP, DATA_READY, and DATA_EN events but these
+events should be staggered across lanes.
+- Table 10.39 Power Down Timing: Lane
+- Symbo
+l
+- Parameter
+- Min
+- Ma
+x
+- Notes
+- Minimum
+- SLEEP active
+time. 1 µs
+- Minimum time hold time between stopping a power down sequence and
+starting a power up sequence.
+- TSLEEP-
+- MIN
+- Exit event to
+data active time. ns
+- Defines the time allocated to power up the lanes and prepared them for
+sending and receiving data. Measured from the start of an exit request to where TX/RX are permitted to move into a data active state.
+- TEXIT-
+- DATAEN
+**Figure 10.75 Lane Power Down Sequence**
+- Staggering
+In order to minimize power transients, it is required to stagger that the SLEEP, DATA_READY, and DATA_EN events across the lanes in the link. The staggering sequence is composed of the delta between events and the step between lanes for each event.
+
+10G Ethernet Controller Functional Description
+**Figure 10.76 Power Up Sequence: Lane Staggering**
+- Table 10.40 Stagger Timing: Lane
+- Symbol
+- Parameter
+- Mi
+n
+- Def
+- Max
+- Notes
+- TSLEEP-
+- STEP
+- SLEEP step time
+between lanes. ns 35 ns 500 ns
+- Wait time between lanes. Programmed through
+- PCS_WRAP_UPHY_TX_CONTROL_1_0 and
+PCS_WRAP_UPHY_RX_CONTROL_1_0 registers. T
+- DATAREADY-
+- STEP
+- DATA_READY step
+time between lanes. ns 35 ns 500 ns
+- Wait time between lanes. Programmed through
+- PCS_WRAP_UPHY_TX_CONTROL_2_0 and
+PCS_WRAP_UPHY_RX_CONTROL_2_0 registers.
+
+10G Ethernet Controller Functional Description
+- Symbol
+- Parameter
+- Mi
+n
+- Def
+- Max
+- Notes
+- TDATAEN-
+- STEP
+- DATA_EN step time
+between lanes. ns 35 ns 500 ns
+- Wait time between lanes. Programmed through
+- PCS_WRAP_UPHY_TX_CONTROL_3_0 and
+PCS_WRAP_UPHY_RX_CONTROL_3_0 registers.
+- Rate Controls
+The lanes have several controls that are used to configure the lane for operation at each target speed including: the serial interface speed the width of the parallel interface used to transfer data between the pad the core logic, and other electrical settings
+- The PLL generates a common clock and the “TX_RATE_ID” signals are used to select the lane
+configuration for the desired serial frequency of operation. The following two registers per MGBE port are used for this operation. CLK_RST_CONTROLLER_GBE_UPHY_MGBE0/1/2/3_CLK_CTRL_0.
+- GBE_UPHY_MGBE0_TX_CLK_DIV_RATIO; Divide by [N+1]: Divider ratio selection
+CLK_RST_CONTROLLER_GBE_UPHY_MGBE0/1/2/3_CLK_CTRL_0.
+- GBE_UPHY_MGBE0_TX_CLK_ENABLE

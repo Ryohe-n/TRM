@@ -1,0 +1,953 @@
+﻿# 11 Functional Safety
+
+## 11.1 Functional Safety
+- Functional safety features, intended for automotive use, have been integrated into
+- NVIDIA® Orin™ in compliance with the ISO 26262 Automotive Functional Safety Standard. This
+section describes the specific implementation of the SCE and HSM modules. In addition to these, (SoC). Further information can be found in the Orin Safety Manual.
+### 11.1.1 Error Reporting
+- Overview
+faults. In general, either the detection is performed by a diagnostic test implemented specifically to detect faults in hardware, or other methods that allow detection of functional errors. ECC, parity, and lockstep implementation are examples of diagnostics added to the SoC to improve diagnostic coverage. FIFO overflow, illegal power on detection, etc., are methods included in the SoC that help detect systematic programming flaws, but can also detect some hardware faults. In both cases, the errors detected by Orin hardware are classified into two categories: 1. 2.
+- Corrected Errors (CEs)
+- Uncorrected Errors (UEs)
+Corrected errors are errors corrected by hardware. In this case, hardware corrects the errors and logs information about this correction. For example, a single-bit error in an SRAM that is protected with SECDED ECC falls into this category. In most cases the error is already corrected in hardware, no additional corrective action is needed in software. However, if the number of corrections exceeds the expected correction rate, corrective action may be necessary. For example, if a location in memory has developed a permanent fault, each read from the memory location indicates a corrected ECC error. Though the error is corrected, it is best to identify that we have a permanent fault that can become a double-bit fault in case of a transient error. A system-level error handler should monitor the frequency of corrected errors to make additional decisions on the status of Orin hardware. The Orin SoC implements error counters and error logging registers to provide additional information of corrected errors to enable any SoC or platform-level corrective measures.
+
+- Error Reporting
+An uncorrected error is a hardware error condition that has not been corrected by the hardware. These errors are reported as uncorrected errors and must be handled by software. A multi-bit error in an SRAM that is protected with SECDED ECC is one example of such an error. In most cases an uncorrected error can lead to unpredictable behavior in hardware. The failure of the hardware should be analyzed to determine corrective action. Except for over-temperature shutdown warnings, all hardware faults are expected to be handled by software. The over-temperature shutdown is reported, but hardware also takes shutdown actions to prevent potential damage.
+#### 11.1.1.1 Error Reporting Architecture
+The Orin SoC assumes the existence of an external monitor to control the SoC in case of certain detected faults. In addition to the external monitor, the SoC also monitors its error status with a hardware-based error manager called Hardware Safety Manager (HSM) and a dedicated internal safety processor (FSI or SCE). Detected faults in Orin are reported to the HSM module in the FSI or SCE. The reporting is either done directly by hardware, by software, or a combination of both. Refer to the Orin Safety Manual for more details about functional safety. Detected faults also interrupt the internal safety processor either directly or via the HSM. The HSM reports errors on the SOC_ERROR pin to the external supervisory MCU. In addition to the SOC_ERROR pin reporting, the Orin SoC assumes that a heartbeat signal is provided by the internal safety processor to the external MCU via the SPI interface. This heartbeat signal provides more details about the state of the Orin SoC via implemented E2E protocol. The external MCU should monitor the SOC_ERROR pin and heartbeat, then apply the appropriate response if faults are detected.
+- The SOC_ERROR and heartbeat reporting mechanisms are complementary, and both must be used
+for Orin in a safety-related application. The internal error reporting architecture is derived with the following goals:
+- Reduce the probability of errors in error reporting to HSM and external monitor path
+- Avoid latency-introducing elements such as interrupts while collecting and reporting
+detected errors to HSM and the external monitor Functional blocks (IPs) report errors to software either with HSM or Legacy Interrupt Controller (LIC) depending on whether they are diagnostic errors or functional errors. Functional errors are expected to be handled by software as part of their functional flow, with the additional requirement of reporting these to safety software. Diagnostic errors are directly reported to safety software through HSM and the internal safety processor. To maintain consistency of handling diagnostic error reporting, a common error collecting plugin called Error Collator (EC) was developed. Blocks that include an EC will collate all diagnostic errors in the local EC and report errors to HSM as a collated corrected or collated uncorrected error. The local ECs also log information for the actual error detected in the EC registers.
+
+- Error Reporting
+For IPs that do not implement a local EC, error signals are either directly routed to the HSM in the SCE, via a local EC in a cluster of IP blocks, or they are collated in local IP error status registers. In case of custom collation of errors, the IPs also report collated corrected and collated uncorrected errors to the HSM. The iGPU reports errors to the CPU Complex (CCPLEX) via LIC as either a stall interrupt or a non- stall interrupt and routes these signals to the HSM. The stall and non-stall interrupts combine all events, along with errors and faults based on stalling/non-stalling classification. These two signals are also routed to HSM, but due to a potential high assertion rate of these signals, they are not conducive for immediate processing in the internal safety processor. If an Orin + dGPU config is used, the dGPU reports errors to Orin via PCIe MSI mechanism. These MSI PCIe interrupts are routed via LIC to CCPLEX. Based on HSM settings, the HSM can drive a GPIO (SOC_ERROR) to indicate the occurrence of an error to an external agent such as a safety MCU. In addition, the HSM can interrupt the internal safety processor if it is programmed to do so, by asserting either LP_INT or HP_INT to the Interrupt Controller. The HSM also asserts HSM_ERR interrupt on detecting errors internal to the HSM. AVIC in turn generates an FIQ or an IRQ to the internal safety processor.
+
+- Error Reporting
+**Figure 11.1 Orin High-Level Error Routing Diagram**
+#### 11.1.1.2 IP Error Reporting Mechanisms
+Most Orin IPs contain local ECs to collect and forward errors to the HSM. The table below lists the Orin IPs with local ECs. Some of these IPs also drive a legacy error signal to the HSM in addition to corrected error and uncorrected error signals generated by the local EC. Also, in certain IPs the error status registers are implemented in the IP rather than in the local EC. Note: Some IPs (which support routing of errors to LIC on functional interrupt signals), allow only a subset of errors to be routed to LIC.
+- Table 11.1 Routing of Orin IP Errors
+- Errors routed
+directly to HSM?
+- Errors routed to LIC
+on functional interrupts?
+- IP
+- Errors routed to HSM
+via Error Collators?
+- Errors routed to HSM
+via a custom error collection?
+- AON
+- YES
+- YES
+
+- Error Reporting
+- Errors routed
+directly to HSM?
+- Errors routed to LIC
+on functional interrupts?
+- IP
+- Errors routed to HSM
+via Error Collators?
+- Errors routed to HSM
+via a custom error collection?
+- BPMP
+- YES
+- YES
+- CAR
+- YES
+- CBB
+- YES
+- YES
+- CCPLEX
+- YES
+- CVNAS
+- YES
+- YES
+- DBB
+- YES
+- DISPLAY
+- YES
+- YES
+- YES
+- DPAUX
+- YES
+- ETHER_QOS
+- YES
+- GPCDMA
+- YES
+- HOST1X
+- YES
+- YES
+- YES
+- HSP (TOP)
+- YES
+- I2C
+- YES
+- ISP
+- YES
+- MSS
+- YES
+- YES
+- YES
+- NVCSI
+- YES
+- YES
+- NVDLA
+- YES
+- NVENC
+- YES
+- PCIe
+- YES
+- YES
+- PINMUX
+- YES
+- PMC
+- YES
+- YES
+- PVA
+- YES
+- QSPI
+- YES
+- RCE
+- YES
+- YES
+- SCE
+- YES
+- YES
+- SDMMC
+- YES
+- SMMU
+- YES
+- SOCTHERM
+- YES
+
+- Error Reporting
+- Errors routed
+directly to HSM?
+- Errors routed to LIC
+on functional interrupts?
+- IP
+- Errors routed to HSM
+via Error Collators?
+- Errors routed to HSM
+via a custom error collection?
+- SOR
+- YES
+- YES
+- SPI
+- YES
+- YES
+- TKE
+- YES
+- UART
+- YES
+- VI
+- YES
+- VIC
+- YES
+#### 11.1.1.3 Error Flow
+Each error reported to the HSM can be configured during initialization to assert the SOC_ERROR pin immediately or after the expiration of the HSM Timer. It can also be configured to interrupt the internal safety processor.
+##### 11.1.1.3.1 Non-GPU Error Flow
+Errors from Orin blocks including the CCPLEX and SCE internal errors are signaled to HSM over corrected, uncorrected, or uncollated error signals. Depending on the HSM configuration, HSM asserts the SOC_ERROR to the safety MCU and interrupt the internal safety processor. Safety software executing on the internal safety processor provides additional error information to the safety MCU over SPI, and queries the safety software executing on the CCPLEX for the resolution status of the error. If the error condition is fully resolved, the internal safety processor software de- asserts SOC_ERROR to the safety MCU after successfully completing a challenge-response with HSM. It is also expected that internal safety processor software will provide error resolution status information to the safety MCU. If the error cannot be resolved, then the safety MCU is responsible for executing the necessary actions such as resetting the Orin to recover from the error.
+##### 11.1.1.3.2 iGPU/dGPU Error Flow
+Errors from iGPU and dGPU are signaled and propagated via CCPLEX. The dGPU generates errors over PCIe using MSIs. These MSIs result in an interrupt to CCPLEX. The iGPU generates two interrupts (stall and non-stall) to signal errors to CCPLEX, which are in turn reported to CCPLEX safety software, which then reports them to internal safety processor software. The internal safety processor software is expected to assert SOC_ERROR via HSM and provide any additional error status information to safety MCU over SPI. Error resolution and interaction between safety software running on the internal safety processor and safety MCU is the same as described earlier.
+
+- Error Reporting
+##### 11.1.1.3.3 CCPLEX Error Flow
+- The CCPLEX routes corrected and uncorrected errors to the HSM. CCPLEX error flows are
+described in the Arm RAS documentation.
+#### 11.1.1.4 Error Handling
+Orin hardware errors are handled by the 3LSS framework. The safety software executed on the internal safety processor is responsible for dispatching error information to CCPLEX safety software. The CCPLEX safety software is tasked with providing error resolution status to SCE safety software. The SCE safety software forwards the error resolution status to safety MCU over SPI and may de-assert SOC_ERROR if the error is resolved without any additional recovery steps. To assist software in logging error information, Orin has allocated non-volatile space in PMC. By communicating error status over both the SOC_ERROR pin, as well as over the SPI at regular intervals, it also mitigates any failures.
+#### 11.1.1.5 Error Output Pin
+The SOC_ERROR pin is an error output pin from the HSM module to the external supervisor. Err, or signals from elements throughout the chip are routed to the HSM. Each of these error signals, if configured to do so within the HSM, can trigger an assertion of the SOC_ERROR pin. All errors that are considered safety-related must be configured to assert the SOC_ERROR pin. During normal operation, the SOC_ERROR pin is asserted by the HSM as soon as possible when an error is detected. The internal safety processor and external system can then attempt to diagnose and contain the error. If the issue is resolved, the SOC_ERROR pin can be deasserted by the internal safety processor. Whenever the external supervisor detects an SOC_ERROR pin deassertion, it must request confirmation of the deassertion from the internal safety processor via the heartbeat signal sent over SPI. The heartbeat signal is state/status information used by the external supervisor to determine the correctness of the application execution on the SoC and is encoded in E2E protocol. If the correct confirmation is not received, the external supervisor continues to assume an SOC_ERROR state on Orin. If the SOC_ERROR pin is not deasserted within the necessary time frame to meet the system Fault Tolerant Time Interval (FTTI), the external system assumes an SOC_ERROR error on Orin and takes appropriate action. During startup, the SOC_ERROR pin is held asserted to indicate that Orin is not yet in a safe state.
+- However, short deassertion glitches on the SOC_ERROR pin are possible during startup. The
+diagnostics in the internal safety processor firmware performs toggling of the SOC_ERROR pin during startup fault injection tests. This ensures that error signals are propagating correctly to the SOC_ERROR pin. Once the startup tests have confirmed that the SoC is in an active state, the SOC_ERROR pin is either deasserted to a logic low level or starts toggling dependent on the chosen operating mode by the internal safety processor firmware.
+
+- Functional Safety Island
+#### 11.1.1.6 Heartbeat Over SPI
+The Orin SoC assumes a continuous status indication to the external system. This is considered as a Heartbeat message and is generated by a challenge response mechanism from the external supervisor to the internal safety processor over the SPI interface. The heartbeat contains health state information and diagnostic test results from throughout the chip. During startup, the external supervisor must wait for 3LSS framework to come up after reset before generating the first heartbeat request to the internal safety processor. No heartbeat requests should be made before this time, as the internal safety processor and SPI are not yet initialized. If the heartbeat information is incorrect or arrives outside the expected target time window, the external supervisor must assume that an error has occurred. During normal operation, the external supervisor functioning as the SPI master must periodically issue heartbeat requests to the internal safety processor within a predefined time frame. The requests must be issued at a frequency of every FTTI or more. If the SoC heartbeat response does not arrive within the expected time frame, contains unexpected information, or contains failure codes for safety-related diagnostics, the external supervisor must assume that an error has occurred on Orin.
+### 11.1.2 Functional Safety Island
+#### 11.1.2.1 Overview
+The Functional Safety Island (FSI) is a processor cluster intended to run functional safety applications at up to ASIL D, or other real-time application tasks. It includes multiple Cortex-R52 real-time processors and a Cortex-R5F real time processor along with dedicated I/O controllers. The FSI is isolated from the rest of the SoC, and has its own voltage rails, a dedicated oscillator, dedicated PLLs, and large internal SRAM. It also supports a number of firewalls in both the control and data planes within the FSI. This ensures a degree of Freedom from Interference (FFI) from the rest of the SoC. FSI allows Orin to run critical safety software, reducing the load on an external safety Micro Controller Unit (MCU).
+- FSI has the necessary hardware features to function as an ASIL D safety processor in an
+automotive system. It consists of:
+- Cortex-R52 Processors – A safety CPU with up to four software-visible cores in Dual-Core
+- Lock-Step (DCLS) Mode, for a total of up to eight physical cores. It can run the Classic
+- AUTOSAR OS, and can implement Error Handling and other workloads. These processors are
+exposed for customer use.
+- Cortex-R5F Processor – A Crypto Hardware Security Module (CHSM) CPU to run Crypto and
+- Secure use-cases like Secure On-board Communication (SecOC) over the CAN Interface. This
+processor is programmed by NVIDIA, and exposed through APIs.
+
+- Functional Safety Island
+- Tightly Coupled Memories, Instruction, and Data caches for each core of the Safety and
+CHSM CPUs.
+- Total of up to 5.5 MB (3 MB SRAM, 2 MB Cortex-R52 TCMs, 0.5 MB Cortex-R5 TCM) of on-
+chip dedicated RAM within the island to ensure that the code execution and data storage can be kept within the FSI.
+- Total of up to 320 KB Cache: 32KB Instruction Cache, 32 KB Data Cache per Cortex-R5 and
+Cortex-R52 CPU. I/O interfaces like CAN, SPI, SBSA UART, and GPIOs for communication with the external components. Hardware Safety mechanisms like DCLS, CRC, ECC, Parity, Timeouts etc., for all IPs within the FSI. Dedicated Thermal, Voltage, and Frequency monitors. Logical Isolation from the rest of the SoC. For some platforms, FSI can be used to offload the main CPU for compute offloads. Towards this, FSI also implements an Interrupt Channel from SoC LIC. This allows SoC IP interrupts to be routed to FSI. However, Interrupts from FSI cannot be routed to LIC.
+##### 11.1.2.1.1 FSI Block Diagram with External Connectivity
+The diagram below details the internal blocks in FSI Cluster along with connectivity from various external blocks.
+
+- Functional Safety Island
+**Figure 11.2 FSI Functional Block Diagram**
+##### 11.1.2.1.2 Hardware Interfaces
+External I/O interfaces:
+- One SPI interface for communication to external safety MCU. Heartbeat signals and error
+information for error logging done by safety MCU are sent on this interface. Refer to the Serial Peripheral Interface (SPI) section for more information. Four GPIOs for miscellaneous control.
+- Two CANs to issue commands to actuators. Refer to the Controller Area Network
+(CAN) section for more information.
+- One SOC_ERROR signal to safety MCU. This signal communicates to safety MCU that faults
+have been detected. A Coresight and debug interface. One SBSA UART for debug purposes. Refer to the SBSA UART section for more information. Internal Interfaces to and from non-FSI:
+
+- Functional Safety Island
+- Memory interface to SoC Data Fabric
+- Interface to and from SoC Control Fabric
+- Interrupts from SoC HSPs
+- Error interrupt signals from SCE HSM
+- Interrupts from LIC to FSI
+##### 11.1.2.1.3 Freedom from Interference
+The FSI is intended to run software that is independent from software running on the rest of the SoC. It is important to ensure that its function is not affected by failures in the rest of SoC. Measures are implemented to minimize the interference from the rest of SoC. FSI has its own dedicated resources for the following:
+- FSI has its own clock unit, PLL, and clock distribution. FSI clocks are sourced from a
+dedicated crystal. Only DFT scan clocks are provided by SoC to FSI. FSI is powered by three independent voltage rails. FSI implements its own temperature monitors. Wherever FSI interfaces with the rest of SoC, the following measures are implemented to reduce the interference: Interrupts sent from LIC to FSI can be disabled at FSI interrupt controllers, if necessary.
+- Booting of FSI is initiated and driven by SoC in MB2, and the control path from the SoC
+Control Plane (also known as the CBB) is active only during the boot phase. However, the path is disabled after boot, so the SoC Control Plane cannot access FSI resources after boot.
+- During boot, key-unwrap key is transferred from SoC to FSI CHSM SE through the keymover
+interface. SE uses the key to perform security operations. The keymover interface is disabled and no further data transfer occurs after boot. Debug interfaces are disabled through FSI control bits in mission mode. The logic generating the FSI reset is in CAR logic on the RTC rail thus bypassing other SoC rails. The FSI DRAM interface provides ASIL D level coverage by adding diagnostics in Hardware in FSI (interface is not dedicated and is actually merges with the rest of the traffic in SoC). FSI can access resources outside of the FSI itself. For example, the FSI can access DRAM through a dedicated SoC DBB master interface. FSI also accesses certain SoC resources through the Control Plane. An example is mailboxes, which are used for inter-processor communication. Timeouts are implemented in FSI to ensure that a transaction that is hung on the SoC side does not result in a hang in FSI. Monitors on these interfaces can be engaged when there are no outstanding transactions, to block off spurious or unexpected data or transactions on the response paths.
+
+- Functional Safety Island
+##### 11.1.2.1.4 Cocoon Mode of Operation
+The cocoon mode of operation is a state where FSI builds fortification around itself to achieve a high degree of isolation from the SoC Logic. The cocoon mode of operation is expected to be engaged by software (and never auto-engaged by hardware). It is strongly recommended as the steady state for FSI, where it executes code from the TCMs and internal SRAM and does not venture out unless requested and/or after determining it is safe to venture out. For the duration that the cocoon mode is disengaged, FSI is vulnerable to any faults that happen in SoC and can get impacted due to dependent failures of SoC. It is expected that in a drive cycle, the cocoon mode will be disengaged less than 1 percent of time. Even in this case, there are bus diagnostics like FSI timeouts that provide coverage for Failure Modes on the interfaces when making accesses. SoC events, such as Faults from SCE HSM, and Interrupts from SCE/CCPLEX mailboxes must still be notified to FSI. For these notification mechanisms, no isolation is engaged in hardware. It is expected that failure modes like continuous reporting from these notification mechanisms will be handled by software, without venturing into the SoC, and instead immediately notifying the external MCU. Recommended Default Mission Mode Configuration: 1. 2. Isolation on FSI CBB Initiator Interface engaged.
+- FSI does not make any accesses into CBB (voluntarily). Spurious responses from CBB are
+blocked. Isolation on FSI CBB Target Interface engaged post boot and never disengaged. Isolation on FSI DBB Interface engaged. Spurious response from SoC is blocked.
+- FSI does not make any accesses into DBB (voluntarily). Spurious responses from DBB are
+blocked. 3. 4. 5. a.
+- Note: In the event FSI is executing Application Code from DRAM, the DBB interface
+isolation always needs to be disengaged. 6. 7. PSC Keymover interface is disabled post boot and never disengaged.
+- Debug interfaces disabled through FSI control-bits in mission mode (Mission Mode = Debug
+Disabled) and debug clocks gated. a.
+- Cocoon mode does not impact the debug outputs from FSI. These help with debug of
+cocoon mode itself in a controlled, non-mission environment if needed. In addition, Debug interfaces like Debug APB and ATB can also be selectively enabled for Debug of Cocoon mode itself as needed.
+##### 11.1.2.1.5 Error Reporting and Handling
+The error architecture includes these main components:
+- Hardware/Software Diagnostics to detect errors. Diagnostics such as ECC also correct
+certain errors.
+
+- Functional Safety Island
+Errors are collated in SCE_HSM for all Parts/Components with exception of FSI. SCE_HSM can communicate error details collected from error sources to FSI. FSI can also collect error information directly from error sources including error sources in HSM except from error sources in CCPLEX and iGPU.
+- CCPLEX can forward interrupts related to error received from LIC to either SCE_HSM or
+directly to FSI. FSI determines criticality of errors and takes appropriate corrective action. This also includes communicating errors to external MCU with redundant methods (SOC_ERROR signal and Heartbeat messages via FSI SPI).
+##### 11.1.2.1.6 Error Types
+The errors detected by the SoC hardware fall into two categories: 1. 2.
+- Corrected Errors
+- Uncorrected Errors
+A corrected error is one where the hardware was able to perform a remedial action, and the error does not affect operation. For instance, a single bit error in an SRAM protected with SECDED ECC falls into this category. Corrected error information is logged and reported by hardware. The SoC implements error counters and error logging registers to provide additional information of corrected errors to enable any SoC or platform level corrective measures. An uncorrected error is a hardware error condition that can not be corrected by the hardware. For example, a 2-bit error in an SRAM protected with SECDED ECC falls in to this category. Software can determine the appropriate action. Information related to uncorrected errors is also logged.
+##### 11.1.2.1.7 Error Reporting to SCE
+Most of the SoC’s IPs outside of FSI, log error information and route error signals either directly or via a local Error Collator (EC) to the Hardware Safety manager (HSM) in the SCE. ECs report errors to HSM as either corrected or uncorrected error. Error information is also logged in local ECs or the
+- IP error status registers. At the minimum the ECs keep track of number of errors detected,
+corrected, and reported.
+- Some IPs report errors only through LIC (includes majority of errors detected in iGPU and
+functional errors in IPs) or dual report the errors to both SCE-HSM and LIC. iGPU primarily reports errors to CCPLEX via LIC as either a stall interrupt or a non-stall interrupt or to HSM. Clock monitor (FMON) errors from iGPU are signaled directly to HSM. FSI HSM aggregates all the faults from various safety-critical components and notifies the Safety CPU and/or External MCU once a fault is detected. It offers certain configurability on aspects of notifications for each fault.
+
+- Hardware Safety Manager (HSM)
+##### 11.1.2.1.8 Boot
+The SoC implements a multi-stage booting process. The boot sequence starts in a mode which is not ready to run safety applications until some checking is performed. The boot sequence can include the IST test sequence to detect latent faults in the SoC. In the SoC, the initial boot sequence starts with SOC_ERROR GPIO indicating that the SoC is not yet ready for safety applications. Any safety errors occurring during boot are handled by FSI (or SCE) once software error handlers get on-line. Two cases must be considered here, and each error must be examined and classified into one of these: The error is expected as a side effect of the reset, an example would be parity errors on an SRAM read before the SRAM is scrubbed.
+- The error is not expected and may be the result of an underlying error. The error handler
+needs to resolve these types of errors before starting safety application.
+##### 11.1.2.1.9 FSI Crypto Hardware Security Module
+- This module consists of necessary components to provide hardware acceleration for various
+cryptographic operations, and hardware-assisted key protection.
+### 11.1.3 Hardware Safety Manager (HSM)
+#### 11.1.3.1 Overview
+The Hardware Safety Manager (HSM) is a dedicated hardware block that is used for monitoring safety-related fault signals from all safety critical modules in the chip. HSM notifies the processors if a fault has occurred and to take appropriate action to handle the fault condition. An instance of HSM exists in both the Safety Cluster Engine (SCE) and the Functional Safety Island (FSI). The main purpose if HSM is monitoring fault signals from safety critical modules. If errors are detected, the HSM notifies external agents like the Micro-Controller Unit (MCU) and SCE/FSI processors via interrupts to take appropriate actions.
+- The SCE HSM collates all the errors from the SoC and routes an interrupt to the SCE
+processor. The FSI HSM collates the errors within the FSI and errors from the SCE HSM. This instance of HSM drives the SOC_ERROR to the external MCU.
+
+- Hardware Safety Manager (HSM)
+**Figure 11.3 HSM Block Diagram**
+##### 11.1.3.1.1 HSM Timer
+The HSM timer provides a mechanism to delay the assertion of SOC_ERROR on observing an error.
+- During HSM initialization, TIMER_THRESHOLD is programmed to control the amount of time
+allowed to resolve an error. This would allow the driver or the SCE/FSI to resolve the error or interrupt without SOC_ERROR getting asserted. The timer counts down as long as the error is asserted. If the error or the interrupt is not handled before the expiration of the HSM timer, then HSM asserts SOC_ERROR and proceeds with the normal error flow. Otherwise, if the error is handled by software before the timer expires, SCE/FSI reloads the HSM timer with the threshold. Note that the timer is reloaded through the challenge response system as described below. In the presence of multiple errors, it is recommended that all the errors be handled before reloading the timer. There is only one HSM timer for all error lines, and so it is recommended that the TIMER_THRESHOLD value is set to the longest time needed to handle a software recoverable error that fits in the Fault Tolerant Time Interval (FTTI) .
+##### 11.1.3.1.2 Challenge Response System
+HSM implements a challenge response system to avoid inadvertent execution of key functions by safety software: deasserting SOC_ERROR, reset request, and reloading HSM timer. The SOC_ERROR signal is deasserted only after safety software reads a scrambled value from the SCRAMBLE register, descrambles, and writes the result to the DESCRAMBLE field. SOC_ERROR is deasserted only if the result matches the expected value.
+
+- HSM Registers
+- In case of a reset request from safety software, the Power Management Controller (PMC) is
+asserted after the safety software reads the scrambled value from the SCRAMBLE field of the
+- FSI_HSM_SCRAMBLE_0 register, descrambles, and writes the expected value to the DESCRAMBLE
+field in the FSI_HSM_RSTREQ_0 register. To reload the HSM timer, the safety software reads the scrambled value from the SCRAMBLE field of the FSI_HSM_SCRAMBLE_0 register, descrambles, and writes the expected value to the DESCRAMBLE field.
+##### 11.1.3.1.3 Clocking
+The entire HSM operates on the core clock. A clock-gate is present for the duplicated logic and the comparator.
+#### 11.1.3.2 HSM Registers
+- FSI_HSM_CONFIG_0
+- Offset: 0x0
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000002 (0bxxxx,xxxx,xxxx,xxxx,xxxx,x000,xxx0,0010)
+- Bit
+- Reset
+- Description
+0x0 SOC_ERROR_CONFIG_LOCK: Sticky bit. Set this bit to 1 to lock access to SOC_ERROR Config Registers.
+- LIST OF SOC_ERROR Registers: SOC_ERROR_INT,
+- SOC_ERROR_OPERATION_MODE, SOC_ERROR_TOGGLE_TIMER
+0x0 INTR_CONFIG_LOCK: Sticky bit. Set this bit to 1 to lock access to Interrupt Config Registers.
+- LIST of INTR_CONFIG Registers: INT_EN, INTR_CLASS
+0x0 TIMER_CONFIG_LOCK: Sticky bit. Set this bit to 1 to lock access to Timer Config Registers.
+- LIST of TIMER_CONFIG Registers: TIMER_EN, HSM_TIMER_THRESHOLD,
+- HSM_TIMER
+0x0 SLCG_OVR_ON: Set to 1 to force pclk to run ungated internally. 0x0 FORCE_ERR_DIS:
+- This is a sticky bit. Once set, write to FORCE_SET and FORCE_CLR registers are
+disabled.
+
+- HSM Registers
+- Bit
+- Reset
+- Description
+0x0 SOC_ERROR_AUTOLOCK_EN:
+- This is a sticky bit and controls the behavior whether the special type of faults
+happening via "Auto_lock_hsm_in" should be masked or not. When Unmasked the faults permanently lock the Challenge Response of SOC_ERROR into a Lock status so that SOC_ERROR can never be set back to Non-erroneous state. 0: Mask 1: Unmask
+- The faults generated via HSM port called Autolock_hsm which is typically set by
+collating various faults that can potentially make Safety Processor and subsystem unreliable. Once such faults occur, one can't rely on SCE-R5 transactions and hence Safety Processor should be prevented from clearing the
+- Challenge Response of SOC_ERROR i.e., blocks further write to
+SOC_ERROR_CLR_0_DESCRAMBLE i.e., FSI_HSM_SOC_ERROR_CLR_0 register. 0x1 DESCRAMBLE_WERR_EN:
+- If set (enable), wrong value written to DESCRAMBLE registers during UNLOCK
+state or write to DESCRAMBLE when in LOCK state will trigger PSLVERR 0x0 LOCK: Sticky bit. Write to 1 to lock access to the all ERROR_CONFIG registers. (SOC_ERROR, INTR, TIMER Error Config registers). Once it is changed to lock state, it will stay in lockstate and cannot be modified. The Configuration Lock bit shall be initialized to unlock state at reset. LIST of ERROR_CONFIG registers:
+- SOC_ERROR_EN, INT_EN, INTR_CLASS, TIMER_EN, HSM_TIMER_THRESHOLD,
+- HSM_TIMER, SOC_ERROR_OPERATION_MODE, SOC_ERROR_TOGGLE_TIMER
+- FSI_HSM_ERR_STATUS_0
+- Offset: 0x4
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+- Bit
+- Reset
+- Description
+0x0 SOC_ERROR_WERR:
+- Set if write to SOC_ERROR_DESCRAMBLE had wrong LFSR value
+0x0 RSTREQ_WERR:
+- Set if write to RSTREQ descramble had wrong LFSR value
+- FSI_HSM_ERR_STATUS_CLR_0
+- Offset: 0x8
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- HSM Registers
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+- Bit
+- Reset
+- Description
+0x0 SOC_ERROR_WERR_CLR:
+- Set to 1 to clear corresponding ERR_STATUS bit
+0x0 RSTREQ_WERR_CLR:
+- Set to 1 to clear corresponding ERR_STATUS bit
+- FSI_HSM_ERR_STATUS_SET_0
+- Offset: 0xc
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+- Bit
+- Reset
+- Description
+0x0 SOC_ERROR_WERR_SET: Set to 1 to set corresponding ERR_STATUS bit. 0x0 RSTREQ_WERR_SET: Set to 1 to set corresponding ERR_STATUS bit.
+- FSI_HSM_SOC_ERROR_STATUS_0
+- Offset: 0x10
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000001 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx1)
+- PROD: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- PROD
+- Description
+0x1 0x0 SOC_ERROR:
+- SOC_ERROR status bit. 1 if SOC_ERROR line is asserted, 0
+otherwise.
+- FSI_HSM_SOC_ERROR_CLR_0
+- Offset: 0x14
+- Read/Write: R/W
+
+- HSM Registers
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 DESCRAMBLE:
+- SOC_ERROR is cleared after writing the expected value to this
+register
+- FSI_HSM_SOC_ERROR_SET_0
+- Offset: 0x18
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx0)
+- Bit
+- Reset
+- Description
+0x0 SOC_ERROR:
+- Set to 1 to assert SOC_ERROR_STATUS_0_SOC_ERROR and the
+SOC_ERROR line.
+- FSI_HSM_SOC_ERROR_CLR_PULSE_WIDTH_0
+- Offset: 0x1c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+15:0 0x0 PULSE_WIDTH:
+- Specify minimum number of cycles SOC_ERROR stays in Non-erroneous state
+after SOC_ERROR_CLR command is issued. SOC_ERROR stays in non- erroneous state even if there are new error interrupts until PULSE_WIDTH
+- Timer Expires. Timer operates with regard to 1us pulses synchronous to
+sce_apb_clk. The pulse width granularity is 1 µs. When the value is 0, that means this register has no effect.
+- FSI_HSM_RSTREQ_0
+- Offset: 0x20
+
+- HSM Registers
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 DESCRAMBLE:
+- Writing the expected value to this register will trigger a system reset
+to PMC
+- FSI_HSM_SCRAMBLE_0
+- Offset: 0x24
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 SCRAMBLE:
+- Returns the next LFSR value
+- FSI_HSM_SOC_ERROR_OPERATION_0
+- Offset: 0x28
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx0)
+- Bit
+- Reset
+- Description
+0x0 MODE:
+- STATIC: Erroneous/non-erroneous is indicated via static state
+0: Non-erroneous 1: Erroneous TOGGLE : Erroneous/Non-erroneous is indicated via Toggling.
+- It is Non-Erroneous when this pin toggles at a rate specified in
+- FSI_HSM_SOC_ERROR_TOGGLE_TIMER
+- It is Erroneous when the pin stays at Logic 1 level
+0 = STATIC 1 = TOGGLE
+
+- HSM Registers
+- FSI_HSM_SOC_ERROR_TOGGLE_0
+- Offset: 0x2c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00004000 (0b0000,0000,0000,0000,0100,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x4000 TIMER_VALUE:
+- Specifies the time period of toggling the SOC_ERROR in terms of 1µs
+pulses synchronous to sce_apb_clk.
+- Applicable when FSI_HSM_SOC_ERROR_OPERATION_MODE is set to
+TOGGLE. Should be programmed with the value which is: 1) Less than FTTI 2) Greater than FSI_HSM_SOC_ERROR_CLR_PULSE_WIDTH
+- Actual value of the timer can be fixed based on platform MCU or other
+related circuit's. sensing granularity. The sampling context explained in
+- FSI_HSM_SOC_ERROR_CLR_PULSE_WIDTH register is applicable here
+also.
+- The timer operates with regard to 1 MHz pulse. SOC_ERROR Toggle
+toggles at every (Value +1) cycles of this pulse.
+- FSI_HSM_HSM_SOC_ERROR_OUT_STATUS_0
+- Offset: 0x30
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000001 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx1)
+- Bit
+- Reset
+- Description
+0x1 SOC_ERROR_OUT:
+- HSM SOC_ERROR output status. 1 if HSM SOC_ERROR output is
+asserted, 0 otherwise.
+- FSI_HSM_HP_INT_STATUS_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_HP_INT_STATUS_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x100,..,0x17c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- HSM Registers
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 STATUS: High priority interrupt status.
+- It shows the latched value of the high priority interrupts. Only to be cleared
+by the Safety Software. Software should write 1 to clear the status after the interrupt has been handled at the source or by the Safety Software.
+- FSI_HSM_LP_INT_STATUS_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_LP_INT_STATUS_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x180,..,0x1fc
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 STATUS: Low priority interrupt status.
+- It shows the latched value of the low priority interrupts. Only to be cleared
+by the Safety Software. Software should write 1 to clear the status after the interrupt has been handled at the source or by the Safety Software.
+- FSI_HSM_RAW_INT_STATUS_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_RAW_INT_STATUS_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x200,..,0x27c
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 STATUS: Unlatched value of the error signal on HSM clock domain and before OR-d with FORCE_ERR registers.
+
+- HSM Registers
+- FSI_HSM_SOC_ERROR_EN_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_SOC_ERROR_EN_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x280,..,0x2fc
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0xffffffff (0b1111,1111,1111,1111,1111,1111,1111,1111)
+- Bit
+- Reset
+- Description
+31:0 0xffffffff SOC_ERROR_EN: Enable fault intimation via SOC_ERROR. Enabled at reset.
+- FSI_HSM_INT_EN_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_INT_EN_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x300,..,0x37c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0xffffffff (0b1111,1111,1111,1111,1111,1111,1111,1111)
+- Bit
+- Reset
+- Description
+31:0 0xffffffff INT_EN: Enable Interrupt intimation for faults. Enabled at reset.
+- FSI_HSM_INTR_CLASS_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_INTR_CLASS_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x380,..,0x3fc
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0xffffffff (0b1111,1111,1111,1111,1111,1111,1111,1111)
+
+- HSM Registers
+- Bit
+- Reset
+- Description
+31:0 0xffffffff INTR_CLASS:
+- Interrupt class. High Priority = 1, Low Priority = 0. High
+Priority at reset.
+- FSI_HSM_TIMER_EN_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_TIMER_EN_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x400,..,0x47c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 TIMER_EN:
+- Count enable to timer
+- FSI_HSM_FORCE_SET_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_FORCE_SET_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x500,..,0x57c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 SET:
+- Force set of error interrupt
+- FSI_HSM_FORCE_CLEAR_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_FORCE_CLEAR_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x580,..,0x5fc
+- Read/Write: R/W
+- Parity Protection: N
+
+- HSM Registers
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 CLEAR:
+- Force clear of error interrupt
+- FSI_HSM_FORCE_STATUS_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_FORCE_STATUS_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x600,..,0x67c
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 STATUS:
+- Force status of error interrupt
+- FSI_HSM_TIMER_THRESHOLD_0
+- Offset: 0x800
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x0000ffff (0bxxxx,xxxx,xxxx,xxxx,1111,1111,1111,1111)
+- Bit
+- Reset
+- Description
+15:0 0xffff VAL:
+- Timer is loaded with this value at reload. Note: This value should NOT
+be programmed to '0'.
+- The timer operates with regard to 1µs pulse synchronous to APB
+clock. So overall timer period is VALUE*1µs
+- FSI_HSM_TIMER_0
+- Offset: 0x804
+- Read/Write: RO
+
+- HSM Registers
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x0000ffff (0bxxxx,xxxx,xxxx,xxx0,1111,1111,1111,1111)
+- Bit
+- Reset
+- Description
+0x0 COUNT_EN:
+- Count enable status of the timer
+15:0 0xffff CUR:
+- Current timer value
+- FSI_HSM_TIMER_LOAD_EN_DESCRAMBLE_0
+- Offset: 0x808
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+- Bit
+- Reset
+- Description
+31:0 0x0 DESCRAMBLE:
+- Load HSM_TIMER with threshold value
+- FSI_HSM_TIMER_INPUT_0
+This is an array of 32 identical register entries; the register fields below apply to each entry. Full register list is: FSI_HSM_TIMER_INPUT_<i>, among which <i> belongs to <0..31>.
+- Offset: 0x80c,..,0x888
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0xXXXXXXXX (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- Description
+31:0 X STATUS:
+- Indicates which error interrupt is triggering timer
+- FSI_HSM_ERROR_COLLATOR_FEATURE_0
+
+- HSM Registers
+- Offset: 0x1000
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00010001 (0b0000,0000,0000,0001,xxxx,xxxx,xx00,0001)
+- Bit
+- Rese
+t
+- Description
+31:1 0x1 NUM_ERR: Number of errors connected to this collator. This is passed as a build time option to the plugin. 5:0 0x1 NUM_ERR_SLICES: Number of error slices supported by this error collator, does not include the GlobalSpace and is derived by ceil (NUM_ERR/32). Software shall first read this register to determine the number of slices and read the required number of Error_Status registers.
+- FSI_HSM_ERROR_COLLATOR_SWRESET_0
+- Offset: 0x1004
+- Read/Write: WO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx0)
+- Bi
+t
+- Res
+et
+- Description
+0x0 SWRST: 1'b1: Issue a Software reset to the Error Collator. This will reset all the registers (Except SCR), counters and logic of the Error Collator. Software can use this bit to flush errors logged into the error collator for example, after Boot, SC7 exit. 1'b0: Do nothing, reset value. This bit is auto-cleared.
+- FSI_HSM_ERROR_COLLATOR_MISSIONERR_TYPE_0
+- Offset: 0x1008
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000005 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00,0101)
+
+- HSM Registers
+- Bi
+t
+- Res
+et
+- Description
+5: 0x5 CODE: This register indicates the fault code of the error line based on the value of MISSIONERR_INDEX Register. This can be used by a fault handling agent to triage an error without requiring device-specific code. The possible values of this field are: 6'd0 : None 6'd1 : Parity Error on internal data path 6'd2 : ECC SEC Error on internal data path 6'd3 : ECC DED Error on internal data path 6'd4 : Comparator Error 6'd5 : Register Parity Error 6'd6 : Parity Error from on-chip SRAM/FIFO 6'd7 : ECC SEC Error from on-chip SRAM/FIFO 6'd8 : ECC DED Error from on-chip SRAM/FIFO 6'd9 : Clock Monitor Error 6'd10 : Voltage Error 6'd11 : Temperature Error 6'd12 : CRC Error on internal data path 6'd16 : Software Corrected Error 6'd17 : Software Uncorrected Error 6'd18 : Software Generic Error 6'd20 : ECC SED Error on internal data path 6'd21 : ECC SED Error from on-chip SRAM/FIFO 6'd32 : Other Hardware Corrected Error 6'd33 : Other Hardware Uncorrected Error All other values : Reserved.
+- FSI_HSM_ERROR_COLLATOR_CURRENT_COUNTER_VALUE_0
+- Offset: 0x100c
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxx0,0000,0000)
+- Bit
+- Reset
+- Description
+8:0 0x0 VALUE:
+- Provides the current value of the counter corresponding to the error in
+MissionErr_Index Register.
+- Default provides the value of error 0 counter. Bit[8] is the overflow bit post
+which the counter saturates and does not counter further.
+- FSI_HSM_ERROR_COLLATOR_MISSIONERR_INDEX_0
+- Offset: 0x1014
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxx0)
+
+- HSM Registers
+- Bit
+- Reset
+- Description
+0x0 IDX:
+- BINARY Encoded. For error number 32, register should be programmed
+with value 0x20. Write to this register with Error number updates:
+- MISSIONERR_TYPE register with the Error-Code for the Error.
+- CURRENT_COUNTER_VALUE register with the error's SEC/DED Counter.
+- MISSIONERR_USERVALUE with value of the first error_<i>_user signal.
+- The number shall update the MISSIONERR_TYPE register with the error
+code and the Current_Counter_Value register with the value of the errors SEC/DED counter. Software can use this register to triage the error.
+- FSI_HSM_ERROR_COLLATOR_CORRECTABLE_THRESHOLD_0
+- Offset: 0x1018
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0000,0000)
+- Bit
+- Reset
+- Description
+7:0 0x0 COUNT:
+- Threshold value for all SEC Fault Reporting Units connected to this error
+collator.
+- SEC Errors are logged once the threshold is reached and the overflow bit
+is set. 7'b0: Log SEC error after receiving 1 Error. 7'b1: Log SEC error after receiving 2 Errors. ... 7'bFF: Log SEC error after receiving 256 Errors.
+- FSI_HSM_ERROR_COLLATOR_MISSIONERR_INJECT_UNLOCK_0
+- Offset: 0x101c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0000,0000)
+
+- HSM Registers
+- Bit
+- Reset
+- Description
+7:0 0x0 VALUE:
+- Writes to ERRSLICE_XXX_MISSIONERR_INJECT registers are disabled until
+this register is written with a value of 0xE1.
+- This is to prevent an inadvertent safety error injection in the safety plugin
+due to: 1. A fault on ERRSLICE_XXX_MISSIONERR_INJECT register itself. 2. Erroneous Software.
+- The register shall be written with a value of 0x0 to reestablish the lock after
+user has completed the error injection testing. 0xE1: Unlock the MISSIONERR_INJECT Register 0x0: Lock the MISSIONERR_INJECT Register 0 = LOCK 225 = UNLOCK
+- FSI_HSM_ERROR_COLLATOR_ERRSLICE0_MISSIONERR_ENABLE_0
+- Offset: 0x1030
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+- Bit
+- Reset
+- Description
+0x1 ERR1: 1'b1 -> Enable Mission Error Reporting for Comparator Error from
+- HSM.lockstep
+1'b0 -> Disable Mission Error Reporting for Comparator Error from
+- HSM.lockstep
+0 = DISABLE 1 = ENABLE 0x1 ERR0: 1'b1 -> Enable Mission Error Reporting for Register Parity Error from
+- NV_SCE_HSM_EC_err_collator
+1'b0 -> Disable Mission Error Reporting for Register Parity Error from
+- NV_SCE_HSM_EC_err_collator
+0 = DISABLE 1 = ENABLE
+- FSI_HSM_ERROR_COLLATOR_ERRSLICE0_MISSIONERR_FORCE_0
+- Offset: 0x1034
+- Read/Write: WO
+- Parity Protection: N
+- Shadow: N
+
+- HSM Registers
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+- Bit
+- Reset
+- Description
+0x0 ERR1: 1'b1 -> Force Assertion of Mission Error Reporting for Comparator Error from HSM.lockstep 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR0: 1'b1 -> Force Assertion of Mission Error Reporting for Register Parity Error from NV_SCE_HSM_EC_err_collator 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE
+- FSI_HSM_ERROR_COLLATOR_ERRSLICE0_MISSIONERR_STATUS_0
+Software must write 1 to clear the fields of this register. Bits in this register continue to be logged independent of the value of MissionError_Enable register, to avoid silent dropping of errors.
+- Offset: 0x1038
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+- Bit
+- Reset
+- Description
+0x0 ERR1: 1'b1 -> Error_1_pulse[1:0] for Comparator Error from HSM.lockstep was equal to 2'b10. 1'b0 -> Error_1_pulse[1:0] for Comparator Error from HSM.lockstep was equal to 2'b01. 0x0 ERR0: 1'b1 -> Error_0_pulse[1:0] for Register Parity Error from NV_SCE_HSM_EC_err_collator was equal to 2'b10. 1'b0 -> Error_0_pulse[1:0] for Register Parity Error from NV_SCE_HSM_EC_err_collator was equal to 2'b01.
+- FSI_HSM_ERROR_COLLATOR_ERRSLICE0_MISSIONERR_INJECT_0
+- Offset: 0x103c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+
+- HSM Registers
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+- Bit
+- Reset
+- Description
+0x0 ERR1: 1'b1 -> Assert the inject_error_1 output for Comparator Error to HSM.lockstep to allow for error injection. 1'b0 -> De-Assert inject_error_1 output. 0 = DISABLE 1 = ENABLE 0x0 ERR0: 1'b1 -> Assert the inject_error_0 output for Register Parity Error to NV_SCE_HSM_EC_err_collator to allow for error injection. 1'b0 -> De-Assert inject_error_0 output. 0 = DISABLE 1 = ENABLE
+- FSI_HSM_ERROR_COLLATOR_ERRSLICE0_LATENTERR_ENABLE_0
+- Offset: 0x1040
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000003 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx11)
+- Bit
+- Reset
+- Description
+0x1 ERR1: 1'b1 -> Enable Latent Error Reporting for Comparator Error from
+- HSM.lockstep
+1'b0 -> Disable Latent Error Reporting for Comparator Error from
+- HSM.lockstep
+0 = DISABLE 1 = ENABLE 0x1 ERR0: 1'b1 -> Enable Latent Error Reporting for Register Parity Error from
+- NV_SCE_HSM_EC_err_collator
+1'b0 -> Disable Latent Error Reporting for Register Parity Error from
+- NV_SCE_HSM_EC_err_collator
+0 = DISABLE 1 = ENABLE
+- FSI_HSM_ERROR_COLLATOR_ERRSLICE0_LATENTERR_FORCE_0
+- Offset: 0x1044
+- Read/Write: WO
+- Parity Protection: N
+
+- HSM Registers
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+- Bit
+- Reset
+- Description
+0x0 ERR1: 1'b1 -> Force Assertion of Latent Error Reporting for Comparator Error from HSM.lockstep 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE 0x0 ERR0: 1'b1 -> Force Assertion of Latent Error Reporting for Register Parity Error from NV_SCE_HSM_EC_err_collator 1'b0 -> Do Nothing 0 = NOFORCE 1 = FORCE
+- FSI_HSM_ERROR_COLLATOR_ERRSLICE0_LATENTERR_STATUS_0
+Software must write 1 to clear the fields of this register. Bits in this register continue to be logged independent of the value of LatentError_Enable register, to avoid silent dropping of errors.
+- Offset: 0x1048
+- Read/Write: R/W
+- Parity Protection: Y
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+- Bit
+- Reset
+- Description
+0x0 ERR1: 1'b1 -> Error_1_pulse[1:0] for Comparator Error from HSM.lockstep was equal to 2'b00 or 2'b11. 1'b0 -> Error_1_pulse[1:0] for Comparator Error from HSM.lockstep was equal to 2'b01 or 2'b10, but no latent error. 0x0 ERR0: 1'b1 -> Error_0_pulse[1:0] for Register Parity Error from NV_SCE_HSM_EC_err_collator was equal to 2'b00 or 2'b11. 1'b0 -> Error_0_pulse[1:0] for Register Parity Error from
+- NV_SCE_HSM_EC_err_collator was equal to 2'b01 or 2'b10, but no latent
+error.
+- FSI_HSM_ERROR_COLLATOR_ERRSLICE0_COUNTER_RELOAD_0
+- Offset: 0x1050
+- Read/Write: WO
+
+- Safety Cluster Engine (SCE)
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+- Bit
+- Reset
+- Description
+0x0 ERR1: 1'b1 -> Reload Error Counter for Comparator Error from HSM.lockstep 1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD 0x0 ERR0: 1'b1 -> Reload Error Counter for Register Parity Error from
+- NV_SCE_HSM_EC_err_collator
+1'b0 -> Do Nothing 0 = NORELOAD 1 = RELOAD
+### 11.1.4 Safety Cluster Engine (SCE)
+#### 11.1.4.1 Overview
+- The Cortex-R5 computing subsystem in the SCE has no planned use in Orin since it is being
+replaced by FSI, and its use is being deprecated. The HSM in SCE will still be used for aggregation of faults in Orin.
+- The Safety Cluster Engine (SCE) is a general-purpose computing subsystem based on an Arm®
+Cortex® -R5F and it is intended to aid with safety management and handling. The SCE subsystem provides all of the necessary hardware features to provide fault management capabilities. The SCE processor cluster consists of a Cortex-R5 processor along with a tightly coupled RAM, support peripherals (such as timers, an interrupt controller), and routing logic. For brevity, the Cortex-R5F core used in SCE is referred to as Cortex-R5 or just R5, but does include the Floating Point and Double Precision Floating Point capabilities.
+##### 11.1.4.1.1 Error Collation
+SCE has modules that are protected in various ways and when a fault occurs, they all generate errors. These errors are aggregated by an error collator and routed to the Hardware Safety Manager.
+
+- Safety Cluster Engine (SCE)
+##### 11.1.4.1.2 HSM
+- The Hardware Safety Manager (HSM) aggregates all the faults from various safety-critical
+components of the SoC and notifies the FSI HSM and SCE Cortex-R5 once a fault is detected. FSI HSM then in-turn notifies FSI CPUs and/or External MCU on the fault. HSM offers configurability on particular aspects of notifications for each fault.
+
+- Notice
+This document is provided for information purposes only and shall not be regarded as a warranty of a certain functionality, condition, or quality of a product. NVIDIA Corporation (“NVIDIA”) makes no representations or warranties, expressed or implied, as to the accuracy or completeness of the information contained in this document and assumes no responsibility for any errors contained herein. NVIDIA shall have no liability for the consequences or use of such information or for any infringement of patents or other rights of third parties that may result from its use. This document is not a commitment to develop, release, or deliver any Material (defined below), code, or functionality. NVIDIA reserves the right to make corrections, modifications, enhancements, improvements, and any other changes to this document, at any time without notice. Customer should obtain the latest relevant information before placing orders and should verify that such information is current and complete. NVIDIA products are sold subject to the NVIDIA standard terms and conditions of sale supplied at the time of order acknowledgement, unless otherwise agreed in an individual sales agreement signed by authorized representatives of NVIDIA and customer (“Terms of Sale”). NVIDIA hereby expressly objects to applying any customer general terms and conditions with regards to the purchase of the NVIDIA product referenced in this document. No contractual obligations are formed either directly or indirectly by this document. NVIDIA products are not designed, authorized, or warranted to be suitable for use in medical, military, aircraft, space, or life support equipment, nor in applications where failure or malfunction of the NVIDIA product can reasonably be expected to result in personal injury, death, or property or environmental damage. NVIDIA accepts no liability for inclusion and/or use of NVIDIA products in such equipment or applications and therefore such inclusion and/or use is at customer’s own risk. NVIDIA makes no representation or warranty that products based on this document will be suitable for any specified use. Testing of all parameters of each product is not necessarily performed by NVIDIA. It is customer’s sole responsibility to evaluate and determine the applicability of any information contained in this document, ensure the product is suitable and fit for the application planned by customer, and perform the necessary testing for the application in order to avoid a default of the application or the product. Weaknesses in customer’s product designs may affect the quality and reliability of the NVIDIA product and may result in additional or different conditions and/or requirements beyond those contained in this document. NVIDIA accepts no liability related to any default, damage, costs, or problem which may be based on or attributable to: (i) the use of the NVIDIA product in any manner that is contrary to this document or (ii) customer product designs. No license, either expressed or implied, is granted under any NVIDIA patent right, copyright, or other NVIDIA intellectual property right under this document. Information published by NVIDIA regarding third-party products or services does not constitute a license from NVIDIA to use such products or services or a warranty or endorsement thereof. Use of such information may require a license from a third party under the patents or other intellectual property rights of the third party, or a license from NVIDIA under the patents or other intellectual property rights of NVIDIA. Reproduction of information in this document is permissible only if approved in advance by NVIDIA in writing, reproduced without alteration and in full compliance with all applicable export laws and regulations, and accompanied by all associated conditions, limitations, and notices. THIS DOCUMENT AND ALL NVIDIA DESIGN SPECIFICATIONS, REFERENCE BOARDS, FILES, DRAWINGS, DIAGNOSTICS, LISTS, AND OTHER DOCUMENTS (TOGETHER AND SEPARATELY, “MATERIALS”) ARE BEING PROVIDED “AS IS.” NVIDIA MAKES NO WARRANTIES, EXPRESSED, IMPLIED, STATUTORY, OR OTHERWISE WITH RESPECT TO THE MATERIALS, AND EXPRESSLY DISCLAIMS ALL IMPLIED WARRANTIES OF NONINFRINGEMENT, MERCHANTABILITY, AND FITNESS FOR A PARTICULAR PURPOSE. TO THE EXTENT NOT PROHIBITED BY LAW, IN NO EVENT WILL NVIDIA BE LIABLE FOR ANY DAMAGES, INCLUDING WITHOUT LIMITATION ANY DIRECT, INDIRECT, SPECIAL, INCIDENTAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES, HOWEVER CAUSED AND REGARDLESS OF THE THEORY OF LIABILITY, ARISING OUT OF ANY USE OF THIS DOCUMENT, EVEN IF NVIDIA HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. Notwithstanding any damages that customer might incur for any reason whatsoever, NVIDIA’s aggregate and cumulative liability towards customer for the products described herein shall be limited in accordance with the Terms of Sale for the product.
+- Trademarks
+NVIDIA, the NVIDIA logo, are trademarks and/or registered trademarks of NVIDIA Corporation in the U.S. and other countries. Other company and product names may be trademarks of the respective companies with which they are associated.
+- VESA DisplayPort
+DisplayPort and DisplayPort Compliance Logo, DisplayPort Compliance Logo for Dual-mode Sources, and DisplayPort Compliance Logo for Active Cables are trademarks owned by the Video Electronics Standards Association in the United States and other countries.
+- HDMI
+HDMI, the HDMI logo, and High-Definition Multimedia Interface are trademarks or registered trademarks of HDMI Licensing LLC.
+- Arm
+Arm, AMBA, and Arm Powered are registered trademarks of Arm Limited. Cortex, MPCore, and Mali are trademarks of Arm Limited. All other brands or product names are the property of their respective holders. ʺArmʺ is used to represent Arm Holdings plc; its operating company Arm Limited; and the regional subsidiaries Arm Inc.; Arm KK; Arm Korea Limited.; Arm Taiwan Limited; Arm France SAS; Arm Consulting (Shanghai) Co. Ltd.; Arm Germany GmbH; Arm Embedded Technologies Pvt. Ltd.; Arm Norway, AS, and Arm Sweden AB.
+- OpenCL
+OpenCL is a trademark of Apple Inc. used under license to the Khronos Group Inc.
+- Copyright
+© 2023 NVIDIA Corporation. All rights reserved.
+- NVIDIA Corporation | 2788 San Tomas Expressway, Santa Clara, CA 95051
+http://www.nvidia.com
