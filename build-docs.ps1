@@ -7,125 +7,199 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Ensure-Dir([string]$p) {
-    if (-not (Test-Path -LiteralPath $p)) {
-        New-Item -ItemType Directory -Path $p | Out-Null
+function Ensure-Dir([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Path $Path | Out-Null
     }
 }
 
-function SafeName([string]$s) {
-    if ($null -eq $s) { return "chapter" }
-    $s = $s.ToLower()
-    $s = $s -replace "[^a-z0-9]+","-"
-    $s = $s -replace "-{2,}","-"
-    $s = $s.Trim("-")
-    if ($s.Length -gt 50) { $s = $s.Substring(0,50) }
-    if ($s.Length -eq 0) { $s = "chapter" }
+function SafeName([string]$s, [int]$MaxLen = 40) {
+    if ($null -eq $s) { $s = "" }
+    $s = $s.Trim().ToLowerInvariant()
+    $s = $s -replace '"', ''
+    $s = $s -replace "'", ''
+    $s = $s -replace '[\(\)\[\]\{\}]', ''
+    $s = $s -replace '[^a-z0-9]+', '-'
+    $s = $s -replace '-{2,}', '-'
+    $s = $s.Trim('-')
+
+    if ($s.Length -gt $MaxLen) {
+        $s = $s.Substring(0, $MaxLen).Trim('-')
+    }
+
+    if ([string]::IsNullOrWhiteSpace($s)) {
+        return "untitled"
+    }
+
     return $s
 }
 
-function IsNoiseHeading([string]$t) {
-    if ($null -eq $t) { return $false }
-    $s = $t.Trim()
+function IsNoiseHeading([string]$titleText) {
+    if ($null -eq $titleText) { return $false }
 
-    if ($s -match "(?i)\b(mhz|ghz|khz|hz|gbps|mbps|kbps|bps)\b") {
-        $x = $s.ToLower()
-        $x = $x -replace "[0-9\.\;\,\*\(\)\[\]\-\/]+"," "
-        $x = $x -replace "\b(mhz|ghz|khz|hz|gbps|mbps|kbps|bps)\b"," "
-        $x = $x -replace "\b(or|and|to|is|are|of|the|a|an|in|on|for|with|without|note|default)\b"," "
-        $x = $x -replace "\s+"," "
-        return ($x.Trim().Length -eq 0)
+    $t = $titleText.Trim()
+    if ([string]::IsNullOrWhiteSpace($t)) { return $false }
+
+    if ($t -notmatch '(?i)\b(hz|khz|mhz|ghz|gbps|mbps|kbps|bps|gb/s|mb/s|kb/s)\b') {
+        return $false
     }
 
-    return $false
+    $x = $t.ToLowerInvariant()
+    $x = $x -replace '[0-9\.\;\,\*\(\)\[\]\-\/]+', ' '
+    $x = $x -replace '\b(hz|khz|mhz|ghz|gbps|mbps|kbps|bps|gb/s|mb/s|kb/s)\b', ' '
+    $x = $x -replace '\b(or|and|to|is|are|of|the|a|an|in|on|for|with|without|note|default)\b', ' '
+    $x = $x -replace '\s+', ' '
+
+    return ($x.Trim().Length -eq 0)
 }
 
-if (-not (Test-Path $SourcePath)) {
-    throw "SOURCE.md not found"
+function GetChapterTitle([int]$chapter, $chapterTitleMap) {
+    if ($chapterTitleMap.ContainsKey($chapter)) {
+        return $chapterTitleMap[$chapter]
+    }
+    return "Chapter $chapter"
 }
 
-$lines = Get-Content $SourcePath -Encoding UTF8
+if (-not (Test-Path -LiteralPath $SourcePath)) {
+    throw "SOURCE.md not found: $SourcePath"
+}
 
-Ensure-Dir $DocsDir
+$lines = Get-Content -LiteralPath $SourcePath -Encoding UTF8
 
-Remove-Item $DocsDir -Recurse -Force -ErrorAction SilentlyContinue
+# 既存出力を掃除
+Remove-Item -LiteralPath $DocsDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $DocsDir | Out-Null
 
-$chapterText = @{}
-$chapterTitle = @{}
+# 章タイトルを拾う（プレーンな「3. Memory...」行）
+$chapterTitleMap = @{}
+$plainChapterRe = '^\s*(1|2|3|4|5|6|7|8|9|10|11)\.\s+(.+?)\s*$'
 
-for ($i=1; $i -le 11; $i++) {
-    $chapterText[$i] = New-Object System.Collections.Generic.List[string]
-}
-
-$headingRegex = '^\s*#{1,6}\s+(\d+(?:\.\d+)+)\s+(.*)$'
-
-$currentChapter = $null
-
-foreach ($line in $lines) {
-
-    $m = [regex]::Match($line,$headingRegex)
-
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    $m = [regex]::Match($lines[$i], $plainChapterRe)
     if ($m.Success) {
-
-        $num = $m.Groups[1].Value
+        $chapterNum = [int]$m.Groups[1].Value
         $title = $m.Groups[2].Value.Trim()
 
-        $chapter = [int]($num.Split(".")[0])
-
-        if ($chapter -ge 1 -and $chapter -le 11) {
-
+        if (-not $chapterTitleMap.ContainsKey($chapterNum)) {
             if (-not (IsNoiseHeading $title)) {
+                $chapterTitleMap[$chapterNum] = $title
+            }
+        }
+    }
+}
 
-                $currentChapter = $chapter
+# Markdown見出し
+# 例:
+# ## 7.1 Host Controller
+# ### 7.1.2 Functional Description
+# #### 7.1.2.1 Channels
+$headingRe = '^\s*(#{1,6})\s+(\d+(?:\.\d+)+)\s*(.*)\s*$'
 
-                if (-not $chapterTitle.ContainsKey($chapter)) {
-                    $chapterTitle[$chapter] = $title
+# セクション保持
+$sections = New-Object System.Collections.Generic.List[object]
+
+$current = $null
+
+function Flush-Current {
+    if ($script:current -ne $null) {
+        $sections.Add($script:current) | Out-Null
+        $script:current = $null
+    }
+}
+
+function New-SectionObject([int]$chapter, [string]$sectionKey, [string]$sectionTitle, [string]$chapterTitle) {
+    return [PSCustomObject]@{
+        Chapter = $chapter
+        ChapterTitle = $chapterTitle
+        SectionKey = $sectionKey
+        SectionTitle = $sectionTitle
+        Lines = New-Object System.Collections.Generic.List[string]
+    }
+}
+
+# SOURCE.mdは最初から ## x.x が主なので、ここを分割点にする
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    $line = $lines[$i]
+    $m = [regex]::Match($line, $headingRe)
+
+    if ($m.Success) {
+        $num = $m.Groups[2].Value
+        $title = $m.Groups[3].Value.Trim()
+
+        if (-not (IsNoiseHeading $title)) {
+            $parts = $num.Split('.')
+
+            if ($parts.Count -ge 2) {
+                $chapter = [int]$parts[0]
+
+                # 1..11章だけ対象
+                if ($chapter -ge 1 -and $chapter -le 11) {
+                    # x.x だけを新規ファイル開始点にする
+                    if ($parts.Count -eq 2) {
+                        Flush-Current
+
+                        $chapterTitle = GetChapterTitle -chapter $chapter -chapterTitleMap $chapterTitleMap
+                        $current = New-SectionObject -chapter $chapter -sectionKey $num -sectionTitle $title -chapterTitle $chapterTitle
+                        $current.Lines.Add(("# {0} {1}" -f $num, $title)) | Out-Null
+                        continue
+                    }
                 }
-
             }
         }
     }
 
-    if ($null -eq $currentChapter) {
+    if ($current -ne $null) {
+        $current.Lines.Add($line) | Out-Null
+    }
+}
+
+Flush-Current
+
+# 章フォルダごとに出力
+$chapterIndexMap = @{}
+$rootIndex = New-Object System.Collections.Generic.List[string]
+$rootIndex.Add("# Orin TRM") | Out-Null
+$rootIndex.Add("") | Out-Null
+$rootIndex.Add("## Chapters") | Out-Null
+$rootIndex.Add("") | Out-Null
+
+for ($chapter = 1; $chapter -le 11; $chapter++) {
+    $chapterSections = @($sections | Where-Object { $_.Chapter -eq $chapter })
+
+    if ($chapterSections.Count -eq 0) {
         continue
     }
 
-    $chapterText[$currentChapter].Add($line)
-}
+    $chapterTitle = GetChapterTitle -chapter $chapter -chapterTitleMap $chapterTitleMap
+    $chapterDirName = "{0:D2}_{1}" -f $chapter, (SafeName $chapterTitle 28)
+    $chapterDirPath = Join-Path $DocsDir $chapterDirName
+    Ensure-Dir $chapterDirPath
 
-$index = New-Object System.Collections.Generic.List[string]
+    $rootIndex.Add(("### {0}. {1}" -f $chapter, $chapterTitle)) | Out-Null
 
-$index.Add("# Orin TRM")
-$index.Add("")
-$index.Add("## Chapters")
-$index.Add("")
+    $chapterIndex = New-Object System.Collections.Generic.List[string]
+    $chapterIndex.Add(("# {0}. {1}" -f $chapter, $chapterTitle)) | Out-Null
+    $chapterIndex.Add("") | Out-Null
+    $chapterIndex.Add("## Sections") | Out-Null
+    $chapterIndex.Add("") | Out-Null
 
-for ($c=1; $c -le 11; $c++) {
+    foreach ($sec in $chapterSections) {
+        $fileName = "{0}_{1}.md" -f $sec.SectionKey, (SafeName $sec.SectionTitle 32)
+        $filePath = Join-Path $chapterDirPath $fileName
 
-    if ($chapterText[$c].Count -eq 0) {
-        continue
+        Set-Content -LiteralPath $filePath -Encoding UTF8 -Value ($sec.Lines -join "`n")
+
+        $relativePath = ("docs/{0}/{1}" -f $chapterDirName, $fileName) -replace '\\', '/'
+        $rootIndex.Add(("- [{0} {1}]({2})" -f $sec.SectionKey, $sec.SectionTitle, $relativePath)) | Out-Null
+        $chapterIndex.Add(("- [{0} {1}]({2})" -f $sec.SectionKey, $sec.SectionTitle, $fileName)) | Out-Null
     }
 
-    $title = $chapterTitle[$c]
+    $chapterIndexPath = Join-Path $chapterDirPath "index.md"
+    Set-Content -LiteralPath $chapterIndexPath -Encoding UTF8 -Value ($chapterIndex -join "`n")
 
-    if ($null -eq $title) {
-        $title = "Chapter $c"
-    }
-
-    $slug = SafeName $title
-
-    $fileName = "{0:D2}_{1}.md" -f $c,$slug
-
-    $path = Join-Path $DocsDir $fileName
-
-    $content = "# $c $title`n`n" + ($chapterText[$c] -join "`n")
-
-    Set-Content $path -Value $content -Encoding UTF8
-
-    $index.Add("- [$c $title](docs/$fileName)")
+    $rootIndex.Add("") | Out-Null
 }
 
-Set-Content $ReadmePath ($index -join "`n") -Encoding UTF8
+Set-Content -LiteralPath $ReadmePath -Encoding UTF8 -Value ($rootIndex -join "`n")
 
-Write-Host "Done."
+Write-Host ("Done. Wrote {0} section files." -f $sections.Count)
