@@ -35,29 +35,32 @@ function SafeName([string]$s, [int]$MaxLen = 40) {
 }
 
 function IsNoiseHeading([string]$titleText) {
-    if ($null -eq $titleText) { return $false }
+    if ($null -eq $titleText) { return $true }
 
     $t = $titleText.Trim()
-    if ([string]::IsNullOrWhiteSpace($t)) { return $false }
+    if ([string]::IsNullOrWhiteSpace($t)) { return $true }
 
-    if ($t -notmatch '(?i)\b(hz|khz|mhz|ghz|gbps|mbps|kbps|bps|gb/s|mb/s|kb/s)\b') {
-        return $false
+    # 数字始まりはかなり危険（1.8 V / 10.28 Gbps など）
+    if ($t -match '^\d') {
+        return $true
     }
 
-    $x = $t.ToLowerInvariant()
-    $x = $x -replace '[0-9\.\;\,\*\(\)\[\]\-\/]+', ' '
-    $x = $x -replace '\b(hz|khz|mhz|ghz|gbps|mbps|kbps|bps|gb/s|mb/s|kb/s)\b', ' '
-    $x = $x -replace '\b(or|and|to|is|are|of|the|a|an|in|on|for|with|without|note|default)\b', ' '
-    $x = $x -replace '\s+', ' '
-
-    return ($x.Trim().Length -eq 0)
-}
-
-function GetChapterTitle([int]$chapter, $chapterTitleMap) {
-    if ($chapterTitleMap.ContainsKey($chapter)) {
-        return $chapterTitleMap[$chapter]
+    # 単位だけ系
+    if ($t -match '(?i)\b(hz|khz|mhz|ghz|gsps|gbps|mbps|kbps|bps|v|mv|uv|gt/s|ms|us|ns|ps)\b') {
+        $x = $t.ToLowerInvariant()
+        $x = $x -replace '[0-9\.\;\,\*\(\)\[\]\-\/]+', ' '
+        $x = $x -replace '\b(hz|khz|mhz|ghz|gsps|gbps|mbps|kbps|bps|v|mv|uv|gt/s|ms|us|ns|ps)\b', ' '
+        $x = $x -replace '\b(or|and|to|is|are|of|the|a|an|in|on|for|with|without|note|default|equalization|case|operating|port)\b', ' '
+        $x = $x -replace '\s+', ' '
+        if ($x.Trim().Length -eq 0) {
+            return $true
+        }
     }
-    return "Chapter $chapter"
+
+    # 明らかにおかしい短文
+    if ($t.Length -lt 3) { return $true }
+
+    return $false
 }
 
 if (-not (Test-Path -LiteralPath $SourcePath)) {
@@ -70,34 +73,26 @@ $lines = Get-Content -LiteralPath $SourcePath -Encoding UTF8
 Remove-Item -LiteralPath $DocsDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $DocsDir | Out-Null
 
-# 章タイトルを拾う（プレーンな「3. Memory...」行）
-$chapterTitleMap = @{}
-$plainChapterRe = '^\s*(1|2|3|4|5|6|7|8|9|10|11)\.\s+(.+?)\s*$'
-
-for ($i = 0; $i -lt $lines.Count; $i++) {
-    $m = [regex]::Match($lines[$i], $plainChapterRe)
-    if ($m.Success) {
-        $chapterNum = [int]$m.Groups[1].Value
-        $title = $m.Groups[2].Value.Trim()
-
-        if (-not $chapterTitleMap.ContainsKey($chapterNum)) {
-            if (-not (IsNoiseHeading $title)) {
-                $chapterTitleMap[$chapterNum] = $title
-            }
-        }
-    }
+# 章タイトルは固定
+$ChapterTitles = @{
+    1  = "Introduction"
+    2  = "Memory Architecture and Memory Mapped I/O"
+    3  = "Boot and Power Management"
+    4  = "System Components"
+    5  = "CPU Complex (CCPLEX)"
+    6  = "GPU"
+    7  = "Multimedia Complex"
+    8  = "Computer Vision Acceleration"
+    9  = "I/O Controllers and Interfaces"
+    10 = "Functional Safety"
+    11 = "Registers"
 }
 
-# Markdown見出し
-# 例:
-# ## 7.1 Host Controller
-# ### 7.1.2 Functional Description
-# #### 7.1.2.1 Channels
-$headingRe = '^\s*(#{1,6})\s+(\d+(?:\.\d+)+)\s*(.*)\s*$'
+# 分割対象は H2 の x.x のみ
+# 例: ## 7.1 Host Controller
+$SectionHeadingRe = '^\s*##\s+((1|2|3|4|5|6|7|8|9|10|11)\.(\d+))\s+(.*\S)\s*$'
 
-# セクション保持
 $sections = New-Object System.Collections.Generic.List[object]
-
 $current = $null
 
 function Flush-Current {
@@ -107,44 +102,29 @@ function Flush-Current {
     }
 }
 
-function New-SectionObject([int]$chapter, [string]$sectionKey, [string]$sectionTitle, [string]$chapterTitle) {
+function New-SectionObject([int]$chapter, [string]$sectionKey, [string]$sectionTitle) {
     return [PSCustomObject]@{
         Chapter = $chapter
-        ChapterTitle = $chapterTitle
         SectionKey = $sectionKey
         SectionTitle = $sectionTitle
         Lines = New-Object System.Collections.Generic.List[string]
     }
 }
 
-# SOURCE.mdは最初から ## x.x が主なので、ここを分割点にする
 for ($i = 0; $i -lt $lines.Count; $i++) {
     $line = $lines[$i]
-    $m = [regex]::Match($line, $headingRe)
+    $m = [regex]::Match($line, $SectionHeadingRe)
 
     if ($m.Success) {
-        $num = $m.Groups[2].Value
-        $title = $m.Groups[3].Value.Trim()
+        $sectionKey = $m.Groups[1].Value
+        $chapter = [int]$m.Groups[2].Value
+        $title = $m.Groups[4].Value.Trim()
 
         if (-not (IsNoiseHeading $title)) {
-            $parts = $num.Split('.')
-
-            if ($parts.Count -ge 2) {
-                $chapter = [int]$parts[0]
-
-                # 1..11章だけ対象
-                if ($chapter -ge 1 -and $chapter -le 11) {
-                    # x.x だけを新規ファイル開始点にする
-                    if ($parts.Count -eq 2) {
-                        Flush-Current
-
-                        $chapterTitle = GetChapterTitle -chapter $chapter -chapterTitleMap $chapterTitleMap
-                        $current = New-SectionObject -chapter $chapter -sectionKey $num -sectionTitle $title -chapterTitle $chapterTitle
-                        $current.Lines.Add(("# {0} {1}" -f $num, $title)) | Out-Null
-                        continue
-                    }
-                }
-            }
+            Flush-Current
+            $current = New-SectionObject -chapter $chapter -sectionKey $sectionKey -sectionTitle $title
+            $current.Lines.Add(("# {0} {1}" -f $sectionKey, $title)) | Out-Null
+            continue
         }
     }
 
@@ -155,8 +135,7 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
 
 Flush-Current
 
-# 章フォルダごとに出力
-$chapterIndexMap = @{}
+# README 生成
 $rootIndex = New-Object System.Collections.Generic.List[string]
 $rootIndex.Add("# Orin TRM") | Out-Null
 $rootIndex.Add("") | Out-Null
@@ -170,7 +149,7 @@ for ($chapter = 1; $chapter -le 11; $chapter++) {
         continue
     }
 
-    $chapterTitle = GetChapterTitle -chapter $chapter -chapterTitleMap $chapterTitleMap
+    $chapterTitle = $ChapterTitles[$chapter]
     $chapterDirName = "{0:D2}_{1}" -f $chapter, (SafeName $chapterTitle 28)
     $chapterDirPath = Join-Path $DocsDir $chapterDirName
     Ensure-Dir $chapterDirPath
