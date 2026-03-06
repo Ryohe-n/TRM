@@ -1,0 +1,2450 @@
+﻿# 4. CPU Complex 5. GPU 6. Multimedia Complex
+
+## 4.10 defines this "Auto CMD Auto Select" mode.
+- Selection of Auto CMD depends on setting of CMD23 Enable in the Host
+- Control 2 register which indicates whether card supports CMD23. If CMD23 Enable =1, Auto
+- CMD23 is used and if CMD23 Enable =0, Auto CMD12 is
+used. In case of Version 4.10 or later, use of Auto CMD Auto Select is recommended rather than use of Auto CMD12 Enable or Auto CMD23 Enable.
+- BLOCK_COUNT_EN - Block Count Enable
+- This bit is used to enable the Block Count register, which is only relevant for
+multiple block transfers. When this bit is 0, the Block Count register is disabled, which is useful in executing an infinite transfer. (Refer to Table 2-8) Host Driver should set this bit to 0 when ADMA is used.
+- DMA_EN - DMA Enable
+- This bit enables DMA functionality as described in section 1.4. DMA can be
+enabled only if it is supported as indicated in the Capabilities register. One of the
+- DMA modes can be selected by DMA Select in the Host Control register. If DMA
+is not supported, this bit is meaningless and shall always read 0. If this bit is set to 1, a DMA operation shall begin when the Host Driver writes to the upper byte of Command register (00Fh).
+
+- SDMMCA Registers
+- Offset: 0xc
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxx00,0000,0000,0000,xxxx,xxx0,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+29:24 0x0
+COMMAND_INDEX
+23:22
+0x0 COMMAND_TYPE: 0 = NORMAL 1 = SUSPEND 2 = RESUME 3 = ABORT
+0x0 DATA_PRESENT_SELECT: 0 = NO_DATA_TRANSFER 1 = DATA_TRANSFER
+0x0 CMD_INDEX_CHECK_EN: 0 = DISABLE 1 = ENABLE
+0x0 CMD_CRC_CHECK_EN: 0 = DISABLE 1 = ENABLE
+0x0 SUB_CMD_FLAG: 0 = MAIN_CMD 1 = SUB_CMD 17:16
+0x0 RESP_TYPE_SELECT: 0 = NO_RESPONSE 1 = RESP_LENGTH_136 2 = RESP_LENGTH_48 3 = RESP_LENGTH_48BUSY
+0x0 RESP_INT_DIS: 0 = ENABLE 1 = DISABLE
+0x0 RESP_ERR_CHK_EN: 0 = DISABLE 1 = ENABLE
+0x0 RESP_TYPE: 0 = R1 1 = R5
+0x0 MULTI_BLOCK_SELECT: 0 = DISABLE 1 = ENABLE
+0x0 DATA_XFER_DIR_SEL: 0 = WRITE 1 = READ
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+3:2
+0x0 AUTO_CMD12_EN: 0 = DISABLE 1 = CMD12 2 = CMD23 3 = AUTO_CMD_AUTO_SEL
+0x0 BLOCK_COUNT_EN: 0 = DISABLE 1 = ENABLE
+0x0 DMA_EN: 0 = DISABLE 1 = ENABLE
+SDMMCA_RESPONSE_R0_R1_0
+Command Response Registers
+The Table below describes the mapping of command responses from the SD Bus to
+this register for each response type. In the table, R[] refers to a bit range within the response data as transmitted on the SD Bus, REP[] refers to a bit range within the Response register. ------------------------------------------------------------------------------------------------------- | Kind of Response | Meaning of Response | Response Field | Response Register | |-----------------------------------------------------------------------------------------------------| |R1, R1b (normal response) | Card Status | R [39:8] | REP [31:0] | |R1b (Auto CMD12 response) | Card Status for Auto CMD12 | R [39:8] | REP [127:96] | |R1 (Auto CMD23 response) | Card Status for Auto CMD23 | R [39:8] | REP [127:96] | |R2 (CID, CSD register) | CID or CSD reg. incl. | R [127:8] | REP [119:0] | |R3 (OCR register) | OCR register for memory | R [39:8] | REP [31:0] | |R4 (OCR register) | OCR register for I/O etc | R [39:8] | REP [31:0] | |R5,R5b | SDIO response | R [39:8] | REP [31:0] | |R6 (Published RCA response) | New published RCA[31:16] etc | R [39:8] | REP [31:0] | -------------------------------------------------------------------------------------------------------
+Response Bit Definition for Each Response Type
+In UHS-II mode, the response of CM-TRAN abort CCMD (4-byte) is stored in offset 13h-10h and the response of SD-TRAN abort CCMD (8-byte) is stored in offset 1Fh-18h
+Command Response [31:0] (R0) Register
+------------------------------------------------------------------------------
+Offset: 0x10
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+```
+
+
+- SDMMCA Registers
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:16 0x0
+CMD_RESP_31_16
+15:0 0x0
+CMD_RESP_15_0
+SDMMCA_RESPONSE_R2_R3_0
+Command Response [63:32] (R2) Register
+Offset: 0x14
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+Bit
+Reset
+Description
+31:16 0x0
+CMD_RESP_63_48
+15:0 0x0
+CMD_RESP_47_32
+SDMMCA_RESPONSE_R4_R5_0
+Command Response [95:64] (R4) Register
+Offset: 0x18
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+Bit
+Reset
+Description
+31:16 0x0
+CMD_RESP_95_80
+15:0 0x0
+CMD_RESP_79_64
+SDMMCA_RESPONSE_R6_R7_0
+```
+
+
+- SDMMCA Registers
+- Command Response [127:96] (R6) Register
+- Offset: 0x1c
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:16 0x0
+CMD_RESP_127_112
+15:0 0x0
+CMD_RESP_111_96
+SDMMCA_BUFFER_DATA_PORT_0
+Buffer Data Port Register
+The Host Controller Buffer can be accessed through this 32-bit Data Port Register.
+Offset: 0x20
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+Bit
+Reset
+Description
+31:0 0x0
+BUFFER_DATA
+SDMMCA_PRESENT_STATE_0
+Present State Register
+CMD_LINE_LEVEL - CMD Line Signal Level
+This status is used to check the CMD line level to recover from errors, and
+for debugging.
+DAT_3_0_LINE_LEVEL - DAT[3:0] Line Signal Level
+This status is used to check the DAT line level to recover from errors, and for
+debugging. This is especially useful in detecting the busy signal level from DAT[0].
+Sub Command Status
+The Command register and Response register are commonly used for
+```
+
+
+- SDMMCA Registers
+main command and sub command. This status is used to distinguish which response error statuses, main command or sub command, indicated in the
+- Error Interrupt Status register or in the UHS-II Error Interrupt Status
+register. Refer to Section 1.17 about details of response error statuses.
+- Just before reading of this register, the Sub Command Flag of the
+Command register or the UHS-II Command register is copied to this status.
+- This status is effective not only when Response Error interrupt is
+generated but also when data error interrupt is generated with Command
+- Not Issued by Error (D27 of this register) or Auto CMD Error interrupt is
+generated with Command Not Issued by Error by Auto CMD12 in the Auto CMD Error Status register. 1 Sub Command Status 0 Main Command Status
+- Command Not Issued by Error
+- Setting of this status indicates that a command cannot be issued due to an
+error except Auto CMD12 error. (Equivalent error status by Auto CMD12 error is defined as Command Not Issued By Auto CMD12 Error in the Auto CMD Error Status register.) This status is set to 1 when Host Controller cannot issue a command after setting Command register or UHS-II Command register. Refer to Section 3.10 about 2L-HD error case in UHS-II mode. Sub Command Status (D28) indicates which command is not issued (main or sub). 1 Command cannot be issued 0 No error for issuing a command
+- Host Regulator Voltage Stable
+- This status is added from Version 4.10 and is used to check whether host
+regulator voltage is stable for switching signal voltage of UHS-I mode. 1 Host Regulator Voltage is stable 0 Host Regulator Voltage is not stable
+- Support of this function is checked by reading this status after that
+- Software Reset For All in the Software Reset register is cleared by the
+- Host Controller in initialization. Setting this status to 1 means that this
+function is supported by the Host Controller.
+- This status may be related to 1.8V Signaling Enable in the Host Control 2
+register. Changing 1.8V Signaling Enable causes unstable of host regulator voltage for I/O cell. Then once this status is set to 0 and retrieved to 1 when host regulator voltage is stable again. When executing power cycle, Host Driver also executes Software Reset For All and it clears 1.8V Signaling Enable to go back signal voltage to 3.3V.
+- If this status is not supported, Host Driver should take more than 5ms for
+stable time of host voltage regulator from changing 1.8V Signaling
+
+- SDMMCA Registers
+- Enable. Specific Host Driver may use a specific time, which is provided by
+Host System, instead of using 5ms.
+- WRITE_PROTECT_LEVEL - Write Protect Switch Pin Level
+- CARD_DETECT_PIN_LEVEL - Card Detect Pin Level
+- CARD_STATE_STABLE - Card State Stable
+- CARD_INSERTED - Card Inserted
+- BUFFER_READ_EN - Buffer Read Enable
+This status is used for non-DMA read transfers.
+- BUFFER_WRITE_EN - Buffer Write Enable
+This status is used for non-DMA write transfers.
+- READ_XFER_ACTIVE - Read Transfer Active
+- WRITE_XFER_ACTIVE - Write Transfer Active
+- RETUNING_REQUEST - Re-Tuning Request
+- DAT_LINE_ACTIVE - DAT Line Active
+- CMD_INHIBIT_DAT - Command Inhibit (DAT)
+- CMD_INHIBIT_CMD - Command Inhibit (CMD)
+- Offset: 0x24
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxx0,0x00,0000,0000,xxxx,0000,0000,0000)
+- PROD: 0x000b0000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- PROD
+- Description
+0x0 _NONE_
+- SUB_CMD_STATUS
+0x0 _NONE_
+- CMD_NOT_ISSUED_BY_ERROR
+0x0 _NONE_
+- HOST_REG_VOLTAGE_STABLE
+0x0 _NONE_ CMD_LINE_LEVEL: 0 = LOW 1 = HIGH 23:20 0x0 _NONE_
+- DAT_3_0_LINE_LEVEL
+0x0
+- ENABLED
+WRITE_PROTECT_LEVEL: 0 = PROTECTED 1 = ENABLED 0x0 _NONE_ CARD_DETECT_PIN_LEVEL: 0 = NO_CARD 1 = CARD 0x0
+- INSERTED
+CARD_STATE_STABLE: 0 = DEBOUNCE 1 = INSERTED
+
+- SDMMCA Registers
+- Bit
+- Reset
+- PROD
+- Description
+0x0
+- INSERTED
+CARD_INSERTED: 0 = DEBOUNCE 1 = INSERTED 0x0 _NONE_ BUFFER_READ_EN: 0 = DISABLE 1 = ENABLE 0x0 _NONE_ BUFFER_WRITE_EN: 0 = DISABLE 1 = ENABLE 0x0 _NONE_ READ_XFER_ACTIVE: 0 = NO_DATA 1 = TRANSFERING 0x0 _NONE_ WRITE_XFER_ACTIVE: 0 = NO_DATA 1 = TRANSFERING 7:4 0x0 _NONE_
+- DAT_7_4_LINE_LEVEL
+0x0 _NONE_ RETUNING_REQUEST: 0 = NOT_REQUIRED 1 = REQUIRED 0x0 _NONE_ DAT_LINE_ACTIVE: 0 = INACTIVE 1 = ACTIVE 0x0 _NONE_ CMD_INHIBIT_DAT: 0 = INACTIVE 1 = ACTIVE 0x0 _NONE_ CMD_INHIBIT_CMD: 0 = INACTIVE 1 = ACTIVE
+- SDMMCA_POWER_CONTROL_HOST_0
+- Power Control / Host Control Register
+- WAKEUP_ON_CARD_REMOVAL - Wakeup Event Enable On SD Card Removal
+- This bit enables wakeup event via Card Removal assertion in the Normal Interrupt
+Status register. FN_WUS (Wake Up Support) in CIS does not affect this bit.
+- WAKEUP_ON_CARD_INSERTION - Wakeup Event Enable On SD Card Insertion
+- This bit enables wakeup event via Card Insertion assertion in the Normal Interrupt
+Status register. FN_WUS (Wake Up Support) in CIS does not affect this bit.
+- WAKEUP_ON_CARD_INTERRUPT - Wakeup Event Enable On Card Interrupt
+- This bit enables wakeup event via Card Interrupt assertion in the Normal Interrupt
+- Status register. This bit can be set to 1 if FN_WUS (Wake Up Support) in CIS is set
+to 1.
+- INTERRUPT_AT_BLOCK_GAP - Interrupt At Block Gap
+
+- SDMMCA Registers
+- This bit is valid only in 4-bit mode of the SDIO card and selects a sample point in
+the interrupt cycle. Setting to 1 enables interrupt detection at the block gap for a multiple block transfer. Setting to 0 disables interrupt detection during a multiple block transfer. If the SD card cannot signal an interrupt during a multiple block transfer, this bit should be set to 0. When the Host Driver detects an SD card insertion, it shall set this bit according to the CCCR of the SDIO card.
+- READ_WAIT_CONTROL - Read Wait Control
+- The read wait function is optional for SDIO cards. If the card supports read wait,
+set this bit to enable use of the read wait protocol to stop read data using the
+- DAT[2] line. Otherwise, the Host Controller has to stop the SD Clock to hold read
+data, which restricts commands generation. When the Host Driver detects an SD card insertion, it shall set this bit according to the CCCR of the SDIO card. If the card does not support read wait, this bit shall never be set to 1 otherwise DAT line conflict may occur. If this bit is set to 0, Suspend/Resume cannot be supported.
+- In UHS-II mode, Read Wait is disabled and DAT[2] line is used for Interrupt Signal
+from UHS-II Card.
+- CONTINUE_REQUEST - Continue Request
+- This bit is used to restart a transaction, which was stopped using the Stop At
+- Block Gap Request. To cancel stop at the block gap, set Stop At Block Gap
+Request to 0 and set this bit 1 to restart the transfer. The Host Controller automatically clears this bit when the transaction re-starts. If Stop At Block Gap Request is set to 1, any write to this bit is ignored. In SD mode, this bit is cleared in either of the following cases: (1) In the case of a read transaction, the DAT Line Active changes from 0 to 1 as a read transaction restarts. (2) In the case of a write transaction, the Write Transfer Active changes from 0 to 1 as the write transaction restarts.
+- Therefore, it is not necessary for Host Driver to set this bit to 0. If Stop At Block
+Gap Request is set to 1, any write to this bit is ignored.
+- STOP_AT_BLOCK_GAP_REQUEST - Stop At Block Gap Request
+- This bit is used to stop executing read and write transaction at the next block gap
+for non-DMA, SDMA and ADMA transfers. The Host Driver shall leave this bit set to 1 until the Transfer Complete is set to 1. Clearing both Stop At Block Gap
+- Request and Continue Request shall not cause the transaction to restart. When
+- Host Controller version is 1.00, the Host Driver can set this bit if the card supports
+- Read Wait Control. When Host Controller version is 2.00 or higher, the Host
+- Driver can set this bit regardless of the card supports Read Wait Control. The
+Host Controller shall stop read transfer by using Read Wait or stopping SD clock.
+- In case of write transfers in which the Host Driver writes data to the Buffer Data
+- Port register, the Host Driver shall set this bit after all block data is written. If this
+bit is set to 1, the Host Driver shall not write data to Buffer Data Port register.
+- This bit affects Read Transfer Active, Write Transfer Active, DAT Line Active
+and Command Inhibit (DAT) in the Present State register. Regarding detailed control of bits D01 and D00, refer to Section 3.8 and 3.12.
+- SD_BUS_VOLTAGE_SELECT - The Host doesnt support the bus voltage selections.For SDMMC1
+- Interfaces,
+
+- SDMMCA Registers
+voltage switching between 3.3V to 1.8V is done by programming the PMU through I2C Interface.
+- SD_BUS_POWER - SD Bus Power
+- Before setting this bit, the SD Host Driver shall set SD Bus Voltage Select. If the
+Host Controller detects the No Card state, this bit shall be cleared.
+- If this bit is cleared, the Host Controller shall immediately stop driving CMD and
+DAT[3:0] (tri-state) and drive SDCLK to low level (refer to Section 2.2.14).
+- CARD_DETECT_SIGNAL_DETECT - Card Detect Signal Selection
+This bit selects source for the card detection.
+- When the source for the card detection is switched, the interrupt should be disabled
+during the switching period by clearing the Interrupt Status/Signal Enable register in order to mask unexpected interrupt being caused by the glitch.
+- The Interrupt Status/Signal Enable should be disabled during over the period of
+debouncing.
+- CARD_DETECT_TEST_LVL - Card Detect Test Level
+- This bit is enabled while the Card Detect Signal Selection is set to 1 and it indicates
+card inserted or not.
+- EXTENDED_DATA_TRANSFER_WIDTH (VENDOR Bit)
+1:8-bit Mode,DATA_XFER_WIDTH is ignored. 0:Card bus width is as per DATA_XFER_WIDTH value
+- DMA Select
+- This field is used to select DMA type. The Host Driver shall check support of DMA
+modes by referring the Capabilities register. Selected DMA is enabled by DMA
+- Enable of the Transfer Mode register in SD mode and DMA Enable of UHS-II
+Transfer Mode register in UHS-II mode. (1) Up to Version 3.00
+- When Host Version 4 Enable is set to 0, setting of this field is compatible to
+Host Controller Version 3.00.
+- SDMA is initiated by writing to the Command register when this field is set to
+00b and the SDMA System Address register (32-bit) is used. SDMA does not support 64-bit addressing.
+- ADMA2 is initiated by writing to the Command register when this field is set to
+10b or 11b. Lower 32-bit of the ADMA System Address register is used when this field is set to 10b and 64-bit of the ADMA System Address register is used when this field is set to 11b. Support of 64-bit System Addressing is indicated by 64-bit System Address Support for V3 in the Capabilities register. 64-bit AMDA2 uses 96-bit Descriptor. 00 SDMA is selected 01 Reserved (New assignment is not allowed) 10 32-bit Address ADMA2 is selected 11 64-bit Address ADMA2 is selected (Optional) (2) Version 4.00 or later
+- When Host Version 4 Enable is set to 1, setting of this field is changed as
+follows. SDMA is initiated by Host Driver writes to the Command register when this
+
+- SDMMCA Registers
+field is set to 00b.
+- ADMA2 is initiated by Host Driver writes to the Command register when this
+field is set to 10b or 11b and by ADMA3 sets to the ADMA System Address register when this field is set to 11b.
+- ADMA3 is initiated by Host Driver writes to the ADMA3 ID Address register
+when this field is set to 11b. 00 SDMA is selected 01 Not Used (New assignment is not allowed) 10 ADMA2 is selected (AMDA3 is not supported or disabled) 11 ADMA2 or ADMA3/CQE is selected
+- Support of 64-bit DMA and 128-bit Descriptor is indicated by 64-bit System
+- Address Support for V4 in the Capabilities register. If the support bit is set
+to 1, all supported DMAs (depends on Support, ADMA2 Support and
+- ADMA3 Support) shall support 64-bit addressing. 64-bit Addressing in the
+Host Controller 2 register selects either 32-bit or 64-bit system addressing of DMAs.
+- HIGH_SPEED_EN - High Speed Enable
+- This bit is optional. Before setting this bit, the Host Driver shall check the High
+- Speed Support in the Capabilities register. If this bit is set to 0 (default), the Host
+- Controller outputs CMD line and DAT lines at the falling edge of the SD Clock (up to
+25MHz). If this bit is set to 1, the Host Controller outputs CMD line and DAT lines at the rising edge of the SD Clock (up to 50MHz).
+- If Preset Value Enable in the Host Control 2 register is set to 1, Host Driver needs
+to reset SD Clock Enable before changing this field to avoid generating clock glitches. After setting this field, the Host Driver sets SD Clock Enable again.
+- DATA_XFER_WIDTH - Data Transfer Width
+- This bit selects the data width of the Host Controller. The Host Driver shall set it to
+match the data width of the SD card.
+- LED_CONTROL - LED Control
+- This bit is used to caution the user not to remove the card while the SD card is
+being accessed. If the software is going to issue multiple SD commands, this bit can be set during all these transactions. It is not necessary to change for each transaction.
+- Offset: 0x28
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,x000,xxxx,0000,xxxx,0000,0000,0000)
+- PROD: 0x00000002 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx0x,xx1x)
+
+- SDMMCA Registers
+- Bit
+- Reset
+- PROD
+- Description
+0x0 _NONE_ WAKEUP_ON_CARD_REMOVAL: 0 = DISABLE 1 = ENABLE 0x0 _NONE_ WAKEUP_ON_CARD_INSERTION: 0 = DISABLE 1 = ENABLE 0x0 _NONE_ WAKEUP_ON_CARD_INTERRUPT: 0 = DISABLE 1 = ENABLE 0x0 _NONE_ INTERRUPT_AT_BLOCK_GAP: 0 = DISABLE 1 = ENABLE 0x0 _NONE_ READ_WAIT_CONTROL: 0 = DISABLE 1 = ENABLE 0x0 _NONE_ CONTINUE_REQUEST: 0 = IGNORED 1 = RESTART 0x0 _NONE_ STOP_AT_BLOCK_GAP_REQUEST: 0 = TRANSFER 1 = STOP 11:9 0x0 _NONE_ SD_BUS_VOLTAGE_SELECT: 5 = V1_8 6 = V3_0 7 = V3_3 0x0 _NONE_ SD_BUS_POWER: 0 = POWER_OFF 1 = POWER_ON 0x0 _NONE_ CARD_DETECT_SIGNAL_DETECT: 0 = SDCD 1 = CARD_DTECT_TST_LVL 0x0 _NONE_ CARD_DETECT_TEST_LVL: 0 = NO_CARD 1 = CARD_INSERTED 0x0
+- NOBIT_8
+EXTENDED_DATA_TRANSFER_WIDTH: 0 = NOBIT_8 1 = BIT_8 4:3 0x0 _NONE_ DMA_SELECT:
+- SW should select ADMA3_CQE in eMMC CMD
+queuing mode. 0 = SDMA 1 = RSVD 2 = ADMA2 3 = ADMA3_CQE 0x0 _NONE_ HIGH_SPEED_EN: 0 = NORMAL_SPEED 1 = HIGH_SPEED
+
+- SDMMCA Registers
+- Bit
+- Reset
+- PROD
+- Description
+0x0
+- BIT_4
+DATA_XFER_WIDTH: 0 = BIT_1 1 = BIT_4 0x0 _NONE_ LED_CONTROL: 0 = OFF 1 = ON
+- SDMMCA_SW_RESET_TIMEOUT_CTRL_CLOCK_CONTROL_0
+- Clock Control Register
+- SW_RESET_FOR_DAT_LINE - Software Reset For DAT Line
+Only part of data circuit is reset. DMA circuit is also reset. The following registers and bits are cleared by this bit:
+- Buffer Data Port register
+Buffer is cleared and initialized.
+- Present State register
+- Buffer Read Enable
+- Buffer Write Enable
+- Read Transfer Active
+- Write Transfer Active
+- DAT Line Active
+- Command Inhibit (DAT)
+- Block Gap Control register
+- Continue Request
+- Stop At Block Gap Request
+- Normal Interrupt Status register
+- Buffer Read Ready
+- Buffer Write Ready
+- DMA Interrupt
+- Block Gap Event
+- Transfer Complete
+- SW_RESET_FOR_CMD_LINE - Software Reset For CMD Line
+- Only part of command circuit is reset to be able to issue a command. From
+- Version 4.10, this bit is also used to initialize UHS-II command circuit. This reset
+is effective only command issuing circuit (including response error statuses related to Command Inhibit (CMD) control) and does not affect data transfer circuit. Host Controller can continue data transfer even this reset is executed during handling of sub command response errors. The following registers and bits are cleared by this bit:
+- Present State register
+- Command Inhibit (CMD)
+
+- SDMMCA Registers
+- Normal Interrupt Status register
+- Command Complete
+- Error Interrupt Status (from Version 4.10)
+- Response error statuses related to Command Inhibit (CMD)
+- SW_RESET_FOR_ALL - Software Reset For All
+This reset affects the entire Host Controller except for the card detection circuit.
+- Register bits of type ROC, RW, RW1C, RWAC are cleared to 0. During its
+initialization, the Host Driver shall set this bit to 1 to reset the Host Controller. The
+- Host Controller shall reset this bit to 0 when Capabilities registers are valid and
+the Host Driver can read them. Additional use of Software Reset For All may not affect the value of the Capabilities registers. If this bit is set to 1, the host driver should issue reset command and reinitialize the SD card.
+- DATA_TIMEOUT_COUNTER_VALUE - Data Timeout Counter Value
+- This value determines the interval by which DAT line timeouts are detected. For
+more information about timeout generation, refer to the Data Timeout Error in the
+- Error Interrupt Status register. Timeout clock frequency will be generated by
+dividing the base clock TMCLK value by this value. When setting this register, prevent inadvertent timeout events by clearing the Data Timeout Error Status
+- Enable (in the Error Interrupt Status Enable register)
+1111b Reserved 1110b TMCLK x pow(2,27) ................. 0001b TMCLK x pow(2,14) 0000b TMCLK x pow(2,13) There are two types of busy periods in a multiple block write operation. (1) Write busy at block gap (without CMD12) is maximum 250ms (2) Write busy after CMD12 is maximum 250ms (500ms for SDXC) If CMD12 is issued during a multiple block write operation busy period, the host timeout counter is reset and the 250ms (500ms for SDXC) timeout period is measured from the response of CMD12. The duration of an erase command can be estimated by the number of write blocks (WRITE_BL) to be erased multiplied by 250 ms.
+- SDCLK_FREQUENCYSELECT - SDCLK Frequency Select
+- This register is used to select the frequency of SDCLK pin. The frequency is not
+programmed directly; rather this register holds the divisor of the Base Clock
+- Frequency For SD Clock in the Capabilities register. Only the following
+settings are allowed.
+- UPPER_SDCLK_FREQUENCYSELECT - Upper Bits of SDCLK Frequency Select
+- Host Controller Version 1.00 and 2.00 do not support these bits and they are
+treated as 00b fixed value (ROC).
+- Host Controller Version 3.00 shall support these bits to expand SDCLK
+- Frequency Select to 10-bit. Bit 07-06 is assigned to bit 09-08 of clock divider in
+SDCLK Frequency Select.
+
+- SDMMCA Registers
+- CLOCK_GENERATOR_SELECT - Clock Generator Select
+- Host Controller Version 3.00 supports this bit. This bit is used to select the clock
+generator mode in SDCLK Frequency Select.
+- If the Programmable Clock Mode is supported (non-zero value is set to Clock
+- Multiplier in the Capabilities register), this bit attribute is RW, and if not
+supported, this bit attribute is RO and zero is read.
+- This bit depends on the setting of Preset Value Enable in the Host Control 2
+register. If the Preset Value Enable = 0, this bit is set by Host Driver.
+- If the Preset Value Enable = 1, this bit is automatically set to a value specified
+in one of Preset Value registers.
+- PLL Enable
+- This bit is added from Version 4.10 for Host Controller using PLL. This feature
+allows Host Controller to initialize clock generator in two steps: by Internal Clock Enable and PLL Enable and to minimize output latency (ex.
+- SDCLK/RCLK, D0 lane) from SD Clock Enable. There are two modes to
+keep Host Drivers compatibility. In both modes, PL L Locked timing is indicated by Internal Clock Stable. (1) When Host Version 4 Enable =0 (Host Driver Version 3, which does not support this bit) or this bit is not implemented, Internal Clock Enable (or SD Clock Enable) may activate PLL ( exit low power mode and start locking clock). (2) When Host Version 4 Enable =1 (Host Driver Version 4), Internal Clock Enable is set before setting this bit and then setting this bit may activate PLL (exit low power mode and start locking clock). 1 PLL is enabled 0 PLL is in low power mode
+- SD_CLK_EN
+- The Host Controller shall stop providing SDCLK or RCLK when writing this bit
+to 0. SDCLK/RCLK Frequency Select can be changed when this bit is 0.
+- Then, the Host Controller shall maintain the same clock frequency until
+- SDCLK is stopped (Stop at SDCLK=0). If the Card Inserted in the Present
+State register is cleared, this bit shall be cleared. 1 Enable providing SDCLK or RCLK 0 Disable providing SDCLK or RCLK (1) SD Mode
+- This is the case when UHS-II Interface Enable is set to 0 in the Host
+- Control 2 register. By setting this bit to 1, SDCLK is provided on pin
+number 5 (CLK). Refer to Section 1.12 Controlling SDCLK.
+- When PLL is used to generate clock, PLL is enabled by PLL Enable (if
+supported) or by SD Clock Enable (if PLL Enable is not supported). When PLL is enabled by PLL Enable, the clock synchronization is checked by Internal Clock Stable.
+
+- SDMMCA Registers
+- INTERNAL_CLOCK_STABLE - Internal Clock Stable
+- As PLL Enable is added from Version 4.10, this status is expanded to check
+two cases. Host Driver Version 4.10 checks clock stability by this status twice after Internal Clock Enable is set and after PLL Enable is set. Refer to Figure 3-3 in SD host spec4.1. (1) Internal Clock Stable (when PLL Enable = 0 or not supported)
+- This bit is set to 1 when internal clock is stable after writing to Internal
+Clock Enable in this register to 1. (2) PLL Clock Stable (when PLL Enable = 1)
+- Host Controller which supports PLL Enable sets this status to 0 once
+when PLL Enable is changed 0 to 1 and then this status is set to 1 when
+- PLL is locked. (PLL uses an internal clock in stable as a reference clock
+which is enabled by Internal Clock Enable). After this bit is set to 1, Host Driver may set SD Clock Enable. 1 Ready 0 Not Ready
+- INTERNAL_CLOCK_EN - Internal Clock Enable
+- This bit is set to 0 when the Host Driver is not using the Host Controller or the
+- Host Controller awaits a wakeup interrupt. The Host Controller should stop its
+internal clock to go very low power state. Still, registers shall be able to be read and written. Clock starts to oscillate when this bit is set to 1. When clock oscillation is stable, the Host Controller shall set Internal Clock Stable in this register to 1. This bit shall not affect card detection.
+- Offset: 0x2c
+- Read/Write: See table below
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,x000,xxxx,0000,0000,0000,000x,0000)
+- PROD: 0x00000002 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+R/W
+- Reset
+- PROD
+- Description
+- RW
+0x0 _NONE_ SW_RESET_FOR_DAT_LINE: 0 = WORK 1 = RESETED
+- RW
+0x0 _NONE_ SW_RESET_FOR_CMD_LINE: 0 = WORK 1 = RESETED
+- RW
+0x0 _NONE_ SW_RESET_FOR_ALL: 0 = WORK 1 = RESETED
+
+- SDMMCA Registers
+- Bit
+R/W
+- Reset
+- PROD
+- Description
+19:16
+- RW
+0x0 _NONE_
+- DATA_TIMEOUT_COUNTER_VALUE
+15:8
+- RW
+0x0 _NONE_ SDCLK_FREQUENCYSELECT: 128 = DIV256 64 = DIV128 32 = DIV64 16 = DIV32 8 = DIV16 4 = DIV8 2 = DIV4 1 = DIV2 0 = BASE 7:6
+- RW
+0x0 _NONE_
+- UPPER_SDCLK_FREQUENCYSELECT
+- RW
+0x0 _NONE_
+- CLOCK_GENERATOR_SELECT
+- RW
+0x0 _NONE_ PLL_EN:
+- In legacy SD mode, no separate PLL is used to
+generate SDCLK. SW should set this as a part of standard SDCLK generation process.
+- PLL is used to generate RCLK in UHS-II mode
+- RW
+0x0 _NONE_ SD_CLOCK_EN: 0 = DISABLE 1 = ENABLE
+- RO
+0x0
+- READY
+INTERNAL_CLOCK_STABLE: 0 = NOT_READY 1 = READY
+- RW
+0x0 _NONE_ INTERNAL_CLOCK_EN: when disabled turns off PLL in uhsII IOBRICK in uhsII mode 0 = STOP 1 = OSCILLATE
+- SDMMCA_INTERRUPT_STATUS_0
+- Normal Interrupt Status Register
+- VEND_SPEC_ERR[1:0]
+1:BOOT_ACK_ERR - Occurs When Boot Ack Status is not equal to '010' 0:BOOT_ACK_TIMEOUT_ERR - Occurs When Boot Ack is not recieved within the programmed number of cycles.
+- TARGET_RESP_ERROR - Not supported for Tegra
+- SPI_ERR
+- Indicate when SPI Error has occured.The SPI Errors are registerd in SPI_INTERRUPT_STATUS
+register.
+- Response Error
+- Host Controller Version 4.00 supports response error check function to avoid
+overhead of response error check by Host Driver during DMA execution. If
+
+- SDMMCA Registers
+- Response Error Check Enable is set to1 in the Transfer Mode register, Host
+- Controller Checks R1 or R5 response. If an error is detected in a response,
+this bit is set to 1.
+- TUNING_ERR
+- This bit is set when an unrecoverable error is detected in a tuning circuit
+except during tuning procedure (Occurrence of an error during tuning procedure is indicated by Sampling Select). By detecting Tuning Error, Host
+- Driver needs to abort a command executing and perform tuning. To reset
+tuning circuit, Sampling Clock shall be set to 0 before executing tuning procedure (refer to Figure 2-29).
+- ADMA_ERR
+- This bit is set when the Host Controller detects errors during ADMA based data
+transfer. The state of the ADMA at an error occurrence is saved in the ADMA
+- Error Status Register,
+- In addition, the Host Controller generates this Interrupt when it detects invalid
+descriptor data (Valid=0) at the ST_FDS state. ADMA Error State in the
+- ADMA Error Status indicates that an error occurs in ST_FDS state. The Host
+Driver may find that Valid bit is not set at the error descriptor.
+- AUTO_CMD12_ERR
+- Auto CMD12 and Auto CMD23 use this error status. This bit is set when
+detecting that any of the bits D00 to D05 in Auto CMD Error Status register has changed from 0 to 1. D07 is effective in case of Auto CMD12. Auto CMD
+- Error Status register is valid while this bit is set to 1 and may be cleared with
+clearing of this bit (another implementation is also allowed).
+- CURRENT_LIMIT_ERR
+- By setting the SD Bus Power bit in the Power Control register, the Host Controller
+is requested to supply power for the SD Bus. If the Host Controller supports the
+- Current Limit function, it can be protected from an illegal card by stopping power
+supply to the card in which case this bit indicates a failure status. Reading 1 means the Host Controller is not supplying power to SD card due to some failure. Reading 0 means that the Host Controller is supplying power and no error has occurred.
+- The Host Controller may require some sampling time to detect the current limit. If
+the Host Controller does not support this function, this bit shall always be set to 0.
+- DATA_END_BIT_ERR
+- Occurs either when detecting 0 at the end bit position of read data which uses the
+DAT line or at the end bit position of the CRC Status.
+- DATA_CRC_ERR
+- Occurs when detecting CRC error when transferring read data which uses the DAT
+line or when detecting the Write CRC status having a value of other than "010".
+- DATA_TIMEOUT_ERR
+Occurs when detecting one of following timeout conditions. (1) Busy timeout for R1b,R5b type (2) Busy timeout after Write CRC status (3) Write CRC Status timeout (4) Read Data timeout.
+- COMMAND_INDEX_ERR
+
+- SDMMCA Registers
+Occurs if a Command Index error occurs in the command response.
+- COMMAND_END_BIT_ERR
+Occurs when detecting that the end bit of a command response is 0.
+- COMMAND_CRC_ERR
+Command CRC Error is generated in two cases. (1) If a response is returned and the Command Timeout Error is set to 0 (indicating no timeout), this bit is set to 1 when detecting a CRC error in the command response. (2) The Host Controller detects a CMD line conflict by monitoring the CMD line when a command is issued. If the Host Controller drives the CMD line to 1 level, but detects 0 level on the CMD line at the next SDCLK edge, then the
+- Host Controller shall abort the command (Stop driving CMD line) and set this
+bit to 1. The Command Timeout Error shall also be set to 1 to distinguish
+- CMD line conflict
+- COMMAND_TIMEOUT_ERR
+- Occurs only if no response is returned within 64 SDCLK cycles from the end bit of
+the command. If the Host Controller detects a CMD line conflict, in which case
+- Command CRC Error shall also be set as shown in Table 2-25, this bit shall be
+set without waiting for 64 SDCLK cycles because the command will be aborted by the Host Controller.
+- ERR_INTERRUPT
+If any of the bits in the Error Interrupt Status register are set, then this bit is set. Therefore the Host Driver can efficiently test for an error by checking this bit first. This bit is read only.
+- FX_EVENT
+- This status is added from Version 4.10. Bit06 of response data will be
+stored in the R[14] of the Response register.
+- Basically, this interrupt is used with response check function. In this case,
+this status is set when R[14] of Response register is set to 1 and Response Type R1 / R5 is set to 0 in the Transfer Mode register or UHSII Transfer Mode register.
+- If response check is disabled, this status is set when R[14] of Response
+register is set to 1. Host Driver needs to screen FX Event interrupt by checking response type is R1. 1 FX_EVENT is detected 0 No Event
+- RETUNING_EVENT - Re-Tuning Event
+- This status is set if Re-Tuning Request in the Present State register
+changes from 0 to 1.
+- Host Controller requests Host Driver to perform re-tuning for next data
+transfer. Current data transfer (not large block count) can be completed without re-tuning. 1 Re-Tuning should be performed 0 Re-Tuning is not required
+- CARD_INTERRUPT
+- Writing this bit to 1 does not clear this bit. It is cleared by resetting the SD card
+interrupt factor. In 1-bit mode, the Host Controller shall detect the Card Interrupt
+
+- SDMMCA Registers
+without SD Clock to support wakeup. In 4-bit mode, the card interrupt signal is sampled during the interrupt cycle, so there are some sample delays between the interrupt signal from the SD card and the interrupt to the Host System. It is necessary to define how to handle this delay.
+- CARD_REMOVAL
+This status is set if the Card Inserted in the Present State register changes from 1 to 0.
+- When the Host Driver writes this bit to 1 to clear this status, the status of the Card
+- Inserted in the Present State register should be confirmed. Because the card
+detect state may possibly be changed when the Host Driver clear this bit and interrupt event may not be generated.
+- CARD_INSERTION
+This status is set if the Card Inserted in the Present State register changes from 0 to 1.
+- When the Host Driver writes this bit to 1 to clear this status, the status of the Card
+- Inserted in the Present State register should be confirmed. Because the card
+detect state may possibly be changed when the Host Driver clear this bit and interrupt event may not be generated.
+- BUFFER_READ_READY
+- This status is set if the Buffer Read Enable changes from 0 to 1. Refer to the
+Buffer Read Enable in the Present State register.
+- BUFFER_WRITE_READY
+- This status is set if the Buffer Write Enable changes from 0 to 1. Refer to the
+Buffer Write Enable in the Present State register.
+- DMA_INTERRUPT
+- This status is set if the Host Controller detects the Host DMA Buffer boundary
+during transfer. Refer to the Host DMA Buffer Boundary in the Block Size register.
+- Other DMA interrupt factors may be added in the future. This interrupt shall not be
+generated after the Transfer Complete.
+- BLOCK_GAP_EVENT
+- If the Stop At Block Gap Request in the Block Gap Control register is set, this bit
+is set when both a read / write transaction is stopped at a block gap. If Stop At Block Gap Request is not set to 1, this bit is not set to 1.
+- XFER_COMPLETE
+This bit indicates stop of transaction on three cases: (1) Completion of a data transfer (2) Completion of a command pairing with response-with-busy (R1b, R5b) (3) Stop of data transfer by setting Stop At Block Gap Request in the Block Gap Control register
+- CMD_COMPLETE
+- This bit is set when get the end bit of the command response. (Except Auto CMD12)
+Refer to Command Inhibit (CMD) in the Present State register.
+- Offset: 0x30
+- Read/Write: See table below
+- Parity Protection: N
+- Shadow: N
+
+- SDMMCA Registers
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0x00,xxx0,0000,0000)
+- Bit
+R/W
+- Reset
+- Description
+31:30
+- RW
+0x0 VEND_SPEC_ERR: 0 = DISABLE 3 = ENABLE
+- RW
+0x0 SPI_ERR: 0 = NO_ERR 1 = ERR
+- RW
+0x0 TARGET_RESP_ERROR: 0 = NO_ERROR 1 = ERROR
+- RW
+0x0 RESP_ERR: 0 = NO_ERR 1 = ERR
+- RW
+0x0 TUNING_ERR: 0 = NO_ERR 1 = ERR
+- RW
+0x0 ADMA_ERR: 0 = NO_ERR 1 = ERR
+- RW
+0x0 AUTO_CMD12_ERR: 0 = NO_ERR 1 = ERR
+- RW
+0x0 CURRENT_LIMIT_ERR: 0 = NO_ERR 1 = POWER_FAIL
+- RW
+0x0 DATA_END_BIT_ERR: 0 = NO_ERR 1 = ERR
+- RW
+0x0 DATA_CRC_ERR: 0 = NO_ERR 1 = ERR
+- RW
+0x0 DATA_TIMEOUT_ERR: 0 = NO_ERR 1 = TIMEOUT
+- RW
+0x0 COMMAND_INDEX_ERR: 0 = NO_ERR 1 = ERR
+- RW
+0x0 COMMAND_END_BIT_ERR: 0 = NO_ERR 1 = END_BIT_ERR_GENERATED
+- RW
+0x0 COMMAND_CRC_ERR: 0 = NO_ERR 1 = CRC_ERR_GENERATED
+
+- SDMMCA Registers
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 COMMAND_TIMEOUT_ERR: 0 = NO_ERR 1 = TIMEOUT
+- RO
+0x0 ERR_INTERRUPT: 0 = NO_ERR 1 = ERR
+- RO
+0x0 FX_EVENT: 0 = NO_EVENT 1 = FX_EVENT_DETECTED
+- RO
+0x0 RETUNING_EVENT: 0 = NO_INT 1 = GEN_INT
+- RO
+0x0 CARD_INTERRUPT: 0 = NO_INT 1 = GEN_INT
+- RW
+0x0 CARD_REMOVAL: 0 = NO_INT 1 = GEN_INT
+- RW
+0x0 CARD_INSERTION: 0 = NO_INT 1 = GEN_INT
+- RW
+0x0 BUFFER_READ_READY: 0 = NO_INT 1 = GEN_INT
+- RW
+0x0 BUFFER_WRITE_READY: 0 = NO_INT 1 = GEN_INT
+- RW
+0x0 DMA_INTERRUPT: 0 = NO_INT 1 = GEN_INT
+- RW
+0x0 BLOCK_GAP_EVENT: 0 = NO_INT 1 = GEN_INT
+- RW
+0x0 XFER_COMPLETE: 0 = NO_INT 1 = GEN_INT
+- RW
+0x0 CMD_COMPLETE: 0 = NO_INT 1 = GEN_INT
+- SDMMCA_INTERRUPT_STATUS_ENABLE_0
+- Normal Interrupt Status Enable Register
+
+- SDMMCA Registers
+This register is used to select which interrupt status is indicated to the Host System as the interrupt. These status bits all share the same 1-bit interrupt line. Setting any of these bits to 1 enables interrupt generation.
+- Offset: 0x34
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,xx00,xxx0,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:30
+0x0 VENDOR_SPECIFIC_ERR: 0 = DISABLE 3 = ENABLE
+0x0 SPI_ERR: 0 = DISABLE 1 = ENABLE
+0x0 TARGET_RESP_ERROR: 0 = NO_ERROR 1 = ERROR
+0x0 RESP_ERROR: 0 = NO_ERROR 1 = ERROR
+0x0 TUNING_ERR: 0 = DISABLE 1 = ENABLE
+0x0 ADMA_ERR: 0 = DISABLE 1 = ENABLE
+0x0 AUTO_CMD12_ERR: 0 = DISABLE 1 = ENABLE
+0x0 CURRENT_LIMIT_ERR: 0 = DISABLE 1 = ENABLE
+0x0 DATA_END_BIT_ERR: 0 = DISABLE 1 = ENABLE
+0x0 DATA_CRC_ERR: 0 = DISABLE 1 = ENABLE
+0x0 DATA_TIMEOUT_ERR: 0 = DISABLE 1 = ENABLE
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0 COMMAND_INDEX_ERR: 0 = DISABLE 1 = ENABLE
+0x0 COMMAND_END_BIT_ERR: 0 = DISABLE 1 = ENABLE
+0x0 COMMAND_CRC_ERR: 0 = DISABLE 1 = ENABLE
+0x0 COMMAND_TIMEOUT_ERR: 0 = DISABLE 1 = ENABLE
+0x0 FX_EVENT: 0 = DISABLE 1 = ENABLE
+0x0 RETUNING_EVENT: 0 = DISABLE 1 = ENABLE
+0x0 CARD_INTERRUPT: 0 = DISABLE 1 = ENABLE
+0x0 CARD_REMOVAL: 0 = DISABLE 1 = ENABLE
+0x0 CARD_INSERTION: 0 = DISABLE 1 = ENABLE
+0x0 BUFFER_READ_READY: 0 = DISABLE 1 = ENABLE
+0x0 BUFFER_WRITE_READY: 0 = DISABLE 1 = ENABLE
+0x0 DMA_INTERRUPT: 0 = DISABLE 1 = ENABLE
+0x0 BLOCK_GAP_EVENT: 0 = DISABLE 1 = ENABLE
+0x0 TRANSFER_COMPLETE: 0 = DISABLE 1 = ENABLE
+0x0 COMMAND_COMPLETE: 0 = DISABLE 1 = ENABLE
+```
+
+
+- SDMMCA Registers
+- SDMMCA_INTERRUPT_SIGNAL_ENABLE_0
+- Normal Interrupt Signal Enable Register
+This register is used to select which interrupt status is notified to the Host System as the interrupt. These status bits all share the same 1-bit interrupt line. Setting any of these bits to 1 enables interrupt generation.
+- Offset: 0x38
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,xx00,xxx0,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:30
+0x0 VENDOR_SPECIFIC_ERR: 0 = DISABLE 3 = ENABLE
+0x0 SPI_ERR: 0 = DISABLE 1 = ENABLE
+0x0 TARGET_RESP_ERROR: 0 = NO_ERROR 1 = ERROR
+0x0 RESP_ERROR: 0 = DISABLE 1 = ENABLE
+0x0 TUNING_ERR: 0 = DISABLE 1 = ENABLE
+0x0 ADMA_ERR: 0 = DISABLE 1 = ENABLE
+0x0 AUTO_CMD12_ERR: 0 = DISABLE 1 = ENABLE
+0x0 CURRENT_LIMIT_ERR: 0 = DISABLE 1 = ENABLE
+0x0 DATA_END_BIT_ERR: 0 = DISABLE 1 = ENABLE
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0 DATA_CRC_ERR: 0 = DISABLE 1 = ENABLE
+0x0 DATA_TIMEOUT_ERR: 0 = DISABLE 1 = ENABLE
+0x0 COMMAND_INDEX_ERR: 0 = DISABLE 1 = ENABLE
+0x0 COMMAND_END_BIT_ERR: 0 = DISABLE 1 = ENABLE
+0x0 COMMAND_CRC_ERR: 0 = DISABLE 1 = ENABLE
+0x0 COMMAND_TIMEOUT_ERR: 0 = DISABLE 1 = ENABLE
+0x0 FX_EVENT: 0 = DISABLE 1 = ENABLE
+0x0 RETUNING_EVENT: 0 = DISABLE 1 = ENABLE
+0x0 CARD_INTERRUPT: 0 = DISABLE 1 = ENABLE
+0x0 CARD_REMOVAL: 0 = DISABLE 1 = ENABLE
+0x0 CARD_INSERTION: 0 = DISABLE 1 = ENABLE
+0x0 BUFFER_READ_READY: 0 = DISABLE 1 = ENABLE
+0x0 BUFFER_WRITE_READY: 0 = DISABLE 1 = ENABLE
+0x0 DMA_INTERRUPT: 0 = DISABLE 1 = ENABLE
+0x0 BLOCK_GAP_EVENT: 0 = DISABLE 1 = ENABLE
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0 TRANSFER_COMPLETE: 0 = DISABLE 1 = ENABLE
+0x0 COMMAND_COMPLETE: 0 = DISABLE 1 = ENABLE
+SDMMCA_AUTO_CMD12_ERR_STATUS_0
+Host Control2 Register / Auto CMD Error Status Register
+PRESET_VALUE_ENABLE - Preset Value Enable
+Host Controller Version 3.00 supports this bit.
+As the operating SDCLK frequency and I/O driver strength depend on the
+Host System implementation, it is difficult to determine these parameters in
+the Standard Host Driver. When Preset Value Enable is set, automatic
+SDCLK frequency generation and driver strength selection is performed
+without considering system specific conditions. This bit enables the functions defined in the Preset Value registers. 1 Automatic Selection by Preset Value are Enabled 0 SDCLK and Driver Strength are controlled by Host Driver
+If this bit is set to 0, SDCLK Frequency Select, Clock Generator Select in
+the Clock Control register and Driver Strength Select in Host Control 2 register are set by Host Driver.
+If this bit is set to 1, SDCLK Frequency Select, Clock Generator Select in
+the Clock Control register and Driver Strength Select in Host Control 2 register are set by Host Controller as specified in the Preset Value registers.
+ASYNC_INTR_EN - Asynchronous Interrupt Enable
+This bit can be set to 1 if a card support asynchronous interrupt and
+Asynchronous Interrupt Support is set to 1 in the Capabilities register.
+Asynchronous interrupt is effective when DAT[1] interrupt is used in 4-bit SD
+mode (and zero is set to Interrupt Pin Select in the Shared Bus Control register). If this bit is set to 1, the Host Driver can stop the SDCLK during asynchronous interrupt period to save power. During this period, the Host
+Controller continues to deliver Card Interrupt to the host when it is asserted
+by the Card. 1 Enabled 0 Disabled
+ADDRESSING_64BIT_EN - 64bit addressing enable
+Host Controller selects either of 32-bit or 64-bit addressing modes to access
+system memory. Whether 32-bit or 64-bit is determined by OS installed in a host system. Host Driver sets this bit depends on addressing mode of installed OS. Refer to 64-bit System Address Support in the Capabilities
+```
+
+
+- SDMMCA Registers
+register. 1 64 bits addressing 0 32 bits addressing
+- HOST_VERSION_4_EN - Host Version 4.00 Enable
+- This bit selects either Version 3.00 compatible mode or Ver4.00 mode. In
+- Version 4.00, support of 64-bit System Addressing is modified. All DMAs
+support 64-bit System Addressing. UHS-II supported Host Driver shall enable this bit. In Version 4.10, supported 32-bit Block Count for all operations. Functions of following fields are modified. (1) SDMA Address
+- SDMA uses ADMA System Address register (05Fh-058h) instead of
+- SDMA System Address register (Offset 003-000h)
+(2) ADMA2 / ADMA3 Selection ADMA3/CQE is selected by DMA Select in the Host Control 1 register. This bit should be set to 1 to use ADMA3/CQE. (3) 64bit ADMA Descriptor Size 128bit descriptor is used instead of 96-bit descriptor when 64-bit Addressing is set to 1. (4) Selection of 32-bit / 64-bit System Addressing
+- Either 32-bit or 64-bit system addressing is selected by 64-bit
+Addressing bit in this register instead of DMA Select in the Host Control 1 register. (5) 32-bit Block Count SDMA System Address register (003h-000h) is modified to 32-bit Block Count register. 1 Version 4.00 Mode 0 Version 3.00 Compatible Mode
+- CMD23_EN
+- In memory card initialization, Host Driver Version 4.10 checks whether card
+supports CMD23 by checking a bit SCR[33]. If the card supports CMD23 (SCR[33]=1), this bit is set to 1. This bit is used to select Auto CMD23 orAuto CMD12 for ADMA3 data transfer. Refer to Auto CMD Enable in the Transfer Mode register.
+- ADMA2 Length Mode
+This bit selects one of ADMA2 Length Modes either 16-bit or 26-bit. 1 26-bit Data Length Mode 0 16-bit Data Length Mode
+- UHS2_IF_EN - UHS-II Interface Enable
+- This bit is used to enable UHS-II Interface. Before trying to start UHS-II
+initialization, this bit shall be set to 1. SD 4-bit Interface signals shall be tri-state (input or bi-directional) or drive to low (output). Before trying to start SD mode initialization, this bit shall be set to. 1 UHS-II Interface Enabled 0 4-bit SD Interface Enabled
+- SAMPLING_CLK_SEL - Sampling Clock Select
+- Host Controller uses this bit to select sampling clock to receive CMD and
+
+- SDMMCA Registers
+- DAT. This bit is set by tuning procedure and valid after the completion of
+tuning (when Execute Tuning is cleared). Setting 1 means that tuning is completed successfully and setting 0 means that tuning is failed. Writing 1 to this bit is meaningless and ignored. A tuning circuit is reset by writing to 0.
+- This bit can be cleared with setting Execute Tuning. Once the tuning circuit
+is reset, it will take time to complete tuning sequence. Therefore, Host Driver should keep this bit to 1 to perform re-tuning sequence to compete re-tuning sequence in a short time. Change of this bit is not allowed while the Host Controller is receiving response or a read data block. Refer to Figure 2-29. 1 Tuned clock is used to sample data 0 Fixed clock is used to sample data
+- EXECUTE_TUNING - Execute Tuning
+- This bit is set to 1 to start tuning procedure and automatically cleared when
+tuning procedure is completed. The result of tuning is indicated to Sampling
+- Clock Select. Tuning procedure is aborted by writing 0. Refer to Figure 2-29
+for more detail about tuning procedure. 1 Execute Tuning 0 Not Tuned or Tuning Completed
+- DRIVE_STRENGTH_SEL - Driver Strength Select
+- Host Controller output driver in 1.8V signaling is selected by this bit. In 3.3V
+signaling, this field is not effective. This field can be set depends on Driver Type A, C and D support bits in the Capabilities register. This bit depends on setting of Preset Value Enable. If Preset Value Enable = 0, this field is set by Host Driver.
+- If Preset Value Enable = 1, this field is automatically set by a value
+specified in the one of Preset Value registers. 00b Driver Type B is Selected (Default) 01b Driver Type A is Selected 10b Driver Type C is Selected 11b Driver Type D is Selected
+- VOLT_18_EN - 1.8V Signaling Enable
+- This bit controls voltage regulator for I/O cell. 3.3V is supplied to the card
+regardless of signaling voltage. Setting this bit from 0 to 1 starts changing signal voltage from 3.3V to 1.8V. 1.8V regulator output shall be stable within 5ms. Host Controller clears this bit if switching to 1.8V signaling fails. Clearing this bit from 1 to 0 starts changing signal voltage from 1.8V to 3.3V. 3.3V regulator output shall be stable within 5ms.
+- Host Driver can set this bit to 1 when Host Controller supports 1.8V signaling
+(One of support bits is set to 1: SDR50, SDR104 or DDR50 in the
+- Capabilities register) and the card or device supports UHS-I (S18R=1. Refer
+to Bus Signal Voltage Switch Sequence in the Physical Layer Specification Version 3.00). 1 1.8V Signaling 0 3.3V Signaling
+- UHS_MODE_SEL - UHS Mode Select
+
+- SDMMCA Registers
+- This field is used to select one of UHS-I modes and effective when 1.8V
+Signaling Enable is set to 1.
+- If Preset Value Enable in the Host Control 2 register is set to 1, Host
+- Controller sets SDCLK Frequency Select, Clock Generator Select in the
+- Clock Control register and Driver Strength Select according to Preset
+- Value registers. In this case, one of preset value registers is selected by this
+field. Host Driver needs to reset SD Clock Enable before changing this field to avoid generating clock glitch. After setting this field, Host Driver sets SD Clock Enable again. 000b SDR12 001b SDR25 010b SDR50 011b SDR104(SD/SDIO)/HS200(eMMC) 100b DDR50(SD/SDIO)/DDR52(eMMC) 101b HS400(eMMC) 110b Reserved 111b UHS2
+- When SDR50, SDR104 or DDR50 is selected for SDIO card, interrupt
+detection at the block gap shall not be used. Read Wait timing is changed for these modes. Refer to the SDIO Specification Version 3.00 for more detail
+- COMMAND_NOT_ISSUED - Command Not Issued By Auto CMD12 Error
+- Setting this bit to 1 means CMD_wo_DAT is not executed due to an Auto
+CMD12 Error (D04-D01) in this register.
+- INDEX_ERR - Auto CMD12 Index Error
+This bit is set if the Command Index error occurs in response to a command.
+- END_BIT_ERR - Auto CMD12 End Bit Error
+This bit is set when detecting that the end bit of command response is 0.
+- CRC_ERR - Auto CMD12 CRC Error
+This bit is set when detecting a CRC error in the command response.
+- TIMEOUT_ERR - Auto CMD12 Timeout Error
+This bit is set if no response is returned within 64 SDCLK cycles from the end bit of command. If this bit is set to 1, the other error status bits (D04-D02) are meaningless.
+- NOT_EXECUTED - Auto CMD12 Not Executed
+- If memory multiple block data transfer is not started due to command error,
+this bit is not set because it is not necessary to issue Auto CMD12. Setting this bit to 1 means the Host Controller cannot issue Auto CMD12 to stop memory multiple block data transfer due to some error. If this bit is set to 1, other error status bits (D04-D01) are meaningless.
+- The relation between Auto CMD12 CRC Error and Auto CMD12 Timeout Error is shown below
+------------------|--------------------------|------------------------------- |Auto CMD12 | Auto CMD12 | Kinds of error | |CRC Error | Timeout Error | | |-----------------|--------------------------|-------------------------------| | 0 | 0 | No Error | | 0 | 1 | Response Timeout Error | | 1 | 0 | Response CRC Error |
+
+- SDMMCA Registers
+| 1 | 1 | CMD line conflict | ------------------------------------------------------------------------------
+- RESP_ERR - Auto CMD Response Error
+- This bit is set when Response Error Check Enable in the Transfer Mode
+register is set to 1 and an error is detected in either R1 response of either Auto CMD12 or Auto CMD23. 1 Error 0 No Error
+- Offset: 0x3c
+- Read/Write: See table below
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,00x0,0000,0000,xxxx,xxxx,0x00,0000)
+- Bit
+R/W
+- Reset
+- Description
+- RW
+0x0 PRESET_VALUE_ENABLE: 0 = HW_SEL 1 = SW_SEL
+- RW
+0x0 ASYNC_INTR_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 ADDRESSING_64BIT_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 HOST_VERSION_4_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 CMD23_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 ADMA2_LEN_MODE: 0 = LEN_16BIT 1 = LEN_26BIT
+- RW
+0x0 UHS2_IF_EN: 0 = DISABLE 1 = ENABLE
+- RW
+0x0 SAMPLING_CLK_SEL: 0 = FIXED 1 = TUNED
+- RW
+0x0 EXECUTE_TUNING: 0 = NOT_TUNED 1 = EXECUTE
+
+- SDMMCA Registers
+- Bit
+R/W
+- Reset
+- Description
+21:20
+- RW
+0x0 DRIVE_STRENGTH_SEL: 0 = TYPE_B 1 = TYPE_A 2 = TYPE_C 3 = TYPE_D
+- RW
+0x0 VOLT_18_EN: 0 = V33 1 = V18 18:16
+- RW
+0x0 UHS_MODE_SEL:
+- The following table shows the PROD mnemonic mapping to
+different SD and eMMC speed modes |--------------|---------------|---------------------| |PROD mnemonic | SD speed mode | eMMC speed mode | |--------------|---------------|---------------------| |prod_c_ds | DS | Legacy (SDR at 26M) | |prod_c_hs | HS | NA | |prod_c_sdr12 | SDR12 | NA | |prod_c_sdr25 | SDR25 | NA | |prod_c_sdr50 | SDR50 | SDR52 | |prod_c_sdr104 | SDR104 | NA | |prod_c_ddr52 | DDR50 | DDR52 | |prod_c_hs200 | NA | HS200 | |prod_c_hs400 | NA | HS400 | |----------------------------------------------------| 0 = SDR12 1 = SDR25 2 = SDR50 3 = SDR104 4 = DDR50 5 = HS400 6 = RSVD 7 = UHS2
+- RO
+0x0 COMMAND_NOT_ISSUED: 0 = NO_ERR 1 = NOT_ISSUED
+- RO
+0x0 RESP_ERR: 0 = NO_ERR 1 = ERR
+- RO
+0x0 INDEX_ERR: 0 = NO_ERR 1 = ERR
+- RO
+0x0 END_BIT_ERR: 0 = NO_ERR 1 = END_BIT_ERR_GENERATED
+- RO
+0x0 CRC_ERR: 0 = NO_ERR 1 = CRC_ERR_GENERATED
+- RO
+0x0 TIMEOUT_ERR: 0 = NO_ERR 1 = TIMEOUT
+- RO
+0x0 NOT_EXECUTED: 0 = EXECUTED 1 = NOT_EXECUTED
+
+- SDMMCA Registers
+- SDMMCA_CAPABILITIES_0
+- Lower Capabilities Register
+- SLOT_TYPE
+00b Removable Card Slot 01b Embedded Slot for One Device 10b Shared Bus Slot 11b UHS-II Multiple Embedded Devices
+- ASYNC_INTR
+1 Asynchronous Interrupt Supported 0 Asynchronous Interrupt Not Supported
+- SYSTEM_BUS_64BIT_SUPPORT - 64-bit System Bus Support for V3
+- Meaning of this bit is different depends on Versions
+Host Controller Version 3.00 and Ver4.10 use this bit as 64-bit System Address support for V3 mode. Host Controller Version 4.00 uses this bit as 64-bit System Address support for both V3 and V4 modes. SDMA cannot be used in 64-bit Addressing in Version 3 mode. If this bit is set to 1, 64-bit ADMA2 with using 96-bit Descriptor may be enabled as follows: In case of Host Controller Version 3, 64-bit ADMA2 is enabled by DMA Select =11b in the Host Control 1 register. In case of Host Controller Version 4, 64-bit ADMA2 for Version 3 is enabled by setting Host Version 4 Enable =0 and DMA Select = 11b. 1 64-bit System Address for V3 is Supported 0 64-bit System Address for V3 is not Supported
+- SYSTEM_BUS_64BIT_SUPPORT_V4 - 64-bit System Bus Support for V4
+- This bit is added from Version 4.10. Setting 1 to this bit indicates that the
+- Host Controller supports 64-bit System Addressing of Version 4 mode
+- When this bit is set to 1, full or a part of 64-bit address should be used to
+decode Host Controller Registers so that Host Controller Registers can be placed above system memory area. 64-bit address decode of Host Controller Registers is effective regardless of setting to 64bit Addressing in Host Control 2. If this bit is set to 1, 64-bit DMA Addressing for Version 4 is enabled by setting Host Version 4
+- Enable =1,
+64-bit Addressing =1 in the Host Control 2 register. SDMA can be used and ADMA2 uses 128-bit Descriptor. 1 64-bit System Address for V4 is Supported 0 64-bit System Address for V4 is not Supported
+
+- SDMMCA Registers
+- VOLTAGE_SUPPORT_1_8_V - Voltage Support 1.8V,The Voltage Support to Card is dependent on
+System & Slot.The platfrom datasheet has this.
+- VOLTAGE_SUPPORT_3_0_V - Voltage Support 3.0V,The Voltage Support to Card is dependent on
+System & Slot.The platfrom datasheet has this.
+- VOLTAGE_SUPPORT_3_3_V - Voltage Support 3.3V,The Voltage Support to Card is dependent on
+System & Slot.The platfrom datasheet has this.
+- SUSPEND_RESUME_SUPPORT - Suspend/Resume Support
+- This bit indicates whether the Host Controller supports Suspend / Resume
+functionality. If this bit is 0, the Host Driver shall not issue either Suspend or
+- Resume commands because the Suspend and Resume mechanism (Refer to
+1.6) is not supported.
+- DMA_SUPPORT - SDMA Support
+- This bit indicates whether the Host Controller is capable of using SDMA to
+transfer data between system memory and the Host Controller directly. Version 4.10 Host Controller shall support SDMA if ADMA2 is supported.
+- HIGH_SPEED_SUPPORT - High Speed Support
+- This bit indicates whether the Host Controller and the Host System support High
+Speed mode and they can supply SD Clock frequency from 25MHz to 50MHz.
+- ADMA1_SUPPORT - ADMA1 Support
+This bit indicates whether the Host Controller is capable of using ADMA1.
+- ADMA2_SUPPORT - ADMA2 Support
+This bit indicates whether the Host Controller is capable of using ADMA2. Version 4.10 Host Controller shall support ADMA2 if ADMA3 is supported.
+- EXTENDED_MEDIA_BUS_SUPPORT
+Setting to 1,indicates 8-bit data bus is supported.
+- MAX_BLOCK_LENGTH - Max Block Length
+- This value indicates the maximum block size that the Host Driver can read and
+write to the buffer in the Host Controller. The buffer shall transfer this block size without wait cycles. Three sizes can be defined as indicated below. It is noted that transfer block length shall be always 512 bytes for SD Memory Cards regardless this field.
+- BASE_CLOCK_FREQUENCY - Base Clock Frequency For SD Clock
+- This value indicates the base (maximum) clock frequency for the SD Clock. Unit
+values are 1MHz. If the real frequency is 16.5MHz, the lager value shall be set 01 0001b (17MHz) because the Host Driver use this value to calculate the clock divider value (Refer to the SDCLK Frequency Select in the Clock Control register.) and it shall not exceed upper limit of the SD Clock frequency. The supported clock range is 10MHz to 63MHz. If these bits are all 0, the Host System has to get information via another method.
+- Not 0 - 1MHz to 63MHz
+000000b- Get information via another method
+- TIMEOUT_CLOCK_UNIT - Timeout Clock Unit
+This bit shows the unit of base clock frequency used to detect Data Timeout Error. 0 KHz 1 MHz
+- TIMEOUT_CLOCK_FREQUENCY - Timeout Clock Frequency
+
+- SDMMCA Registers
+This bit shows the base clock frequency used to detect Data Timeout Error. The Timeout Clock Unit defines the unit of this fields value.
+- Timeout Clock Unit =0 [KHz] unit: 1KHz to 63KHz
+- Timeout Clock Unit =1 [MHz] unit: 1MHz to 63MHz
+- Not 0 - 1KHz to 63KHz or 1MHz to 63MHz
+000000b - Get information via another method
+- Offset: 0x40
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x3f6cd08c (0b0011,1111,011x,1100,1101,0000,1x00,1100)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:30
+0x0 SLOT_TYPE: 0 = REMOVABLE 1 = EMBEDDED 2 = SHARED 3 = UHS2_MULTIPLE_EMBEDDED
+0x1 ASYNC_INTR: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 SYSTEM_BUS_64BIT_SUPPORT: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 SYSTEM_BUS_64BIT_SUPPORT_V4: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 VOLTAGE_SUPPORT_1_8_V: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 VOLTAGE_SUPPORT_3_0_V: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 VOLTAGE_SUPPORT_3_3_V: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x0 SUSPEND_RESUME_SUPPORT: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 DMA_SUPPORT: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 HIGH_SPEED_SUPPORT: 0 = NOT_SUPPORTED 1 = SUPPORTED
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x1 ADMA2_SUPPORT: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 EXTENDED_MEDIA_BUS_SUPPORT: 0 = NOT_SUPPORTED 1 = SUPPORTED 17:16
+0x0 MAX_BLOCK_LENGTH: 0 = BYTE512 1 = BYTE1024 2 = BYTE2048 3 = RESERVED 15:8 0xd0
+BASE_CLOCK_FREQUENCY
+0x1 TIMEOUT_CLOCK_UNIT:
+MHz
+0 = KHZ 1 = MHZ 5:0 0xc TIMEOUT_CLOCK_FREQUENCY: 12MHz TMCLK is used in legacy SD/eMMC mode
+TMCLK freq value will be advertised based on UHS2_IF_EN and
+USE_TMCLK_FOR_DATA_TIMEOUT
+SDMMCA_CAPABILITIES_HIGHER_0
+Higher Capabilities Register
+1.8V VDD2 Support This bit indicates that support of VDD2 on the Host System. 0b 1.8V VDD2 is not supported 1b 1.8V VDD2 is supported
+ADMA3_SUPPORT - ADMA3 Support
+This bit indicates that support of ADMA3 on Host Controller. 0b ADMA3 is not supported 1b ADMA3 is supported
+Clock Multiplier
+This field indicates clock multiplier value of programmable clock generator.
+Refer to Clock Control register. Setting 00h means that Host Controller
+does not support programmable clock generator. 00h Clock Multiplier is Not Supported 01h Clock Multiplier M = 2 02h Clock Multiplier M = 3 ..... ......................
+Timer Count for Re-Tuning
+0h Re-Tuning timer disabled 1h 1 seconds
+```
+
+
+- SDMMCA Registers
+2h 2 seconds 3h 4 seconds . ...................... . ...................... nh 2**(n-1) seconds . ...................... . ......................
+- Fh Get information from other source
+- Driver Type D Support
+This bit indicates support of Driver Type D for 1.8 Signaling. 1 Driver Type D is Supported 0 Driver Type D is Not Supported
+- Driver Type C Support
+This bit indicates support of Driver Type C for 1.8 Signaling. 1 Driver Type C is Supported 0 Driver Type C is Not Supported
+- Driver Type A Support
+This bit indicates support of Driver Type A for 1.8 Signaling. 1 Driver Type A is Supported 0 Driver Type A is Not Supported
+- UHS2_SUPPORT - UHS-II Support (UHS-II only)
+- This bit indicates whether Host Controller supports UHS-II. If this bit is set
+to 1, 1.8V VDD2 Support shall be set to 1 (Host System shall support VDD2 power supply). 1 UHS-II is supported 0 UHS-II is not supported
+- DDR50 Support
+1 DDR50 is Supported 0 DDR50 is Not Supported
+- SDR104 Support
+SDR104 requires tuning. 1 SDR104 is Supported 0 SDR104 is Not Supported
+- SDR50 Support
+- If SDR104 is supported, this bit shall be set to 1. Bit 40 indicates whether
+SDR50 requires tuning or not. 1 SDR50 is Supported 0 SDR50 is Not Supported
+- Offset: 0x44
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x18002f73 (0bxxx1,1xxx,0000,0000,001x,1111,x111,0011)
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x1 VDD2_1_8V_SUPPORT: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 ADMA3_SUPPORT: 0 = NOT_SUPPORTED 1 = SUPPORTED 23:16 0x0
+CLOCK_MULTIPLIER
+15:14
+0x0 RETUNING_MODES: 0 = MODE1 1 = MODE2 2 = MODE3 3 = MODE4
+0x1 SDR50_TUNING: 0 = NOT_REQUIRED 1 = REQUIRED 11:8 0xf
+RETUNING_TIMER_COUNT
+0x1 TYPE_D_DRIVER: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 TYPE_C_DRIVER: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 TYPE_A_DRIVER: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x0 UHS2_SUPPORT: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x0 DDR50: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 SDR104: 0 = NOT_SUPPORTED 1 = SUPPORTED
+0x1 SDR50: 0 = NOT_SUPPORTED 1 = SUPPORTED
+SDMMCA_MAXIMUM_CURRENT_0
+Maximum Current Capabilities Register
+```
+
+
+- SDMMCA Registers
+- Offset: 0x48
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,0000,0000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+23:16 0x0 MAXIMUM_CURRENT_FOR_1_8V:
+Maximum Current for 1.8V VDD1
+15:8 0x0 MAXIMUM_CURRENT_FOR_3_0V:
+Maximum Current for 3.0V VDD1
+7:0 0x0 MAXIMUM_CURRENT_FOR_3_3V:
+Maximum Current for 3.3V VDD1
+SDMMCA_MAXIMUM_CURRENT_HI_0
+Maximum Current Capabilities2 Register
+Offset: 0x4c
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0000,0000)
+Bit
+Reset
+Description
+7:0 0x0 MAXIMUM_CURRENT_FOR_1_8V_VDD2:
+Maximum Current for 1.V VDD2
+SDMMCA_FORCE_EVENT_0
+Force Event for Auto CMD12 Error Status Register
+The Force Event Register is not a physically implemented register. Rather, it is an address at which the Auto CMD12 Error Status Register can be written.
+Writing 1 : set each bit of the Auto CMD12 Error Status Register
+Writing 0 : no effect
+```
+
+
+- SDMMCA Registers
+- Offset: 0x50
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,xxxx,xxxx,0x00,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:30
+0x0 VENDOR_SPECIFIC_ERR_STATUS: 0 = DISABLE 3 = ENABLE
+0x0 TARGET_RESP_ERROR: 0 = NO_ERROR 1 = ERROR
+0x0 RESP_ERROR: 0 = NO_ERROR 1 = ERROR
+0x0 TUNING_ERR: 0 = DISABLE 1 = ENABLE
+0x0 ADMA_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 AUTOCMD12_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 CURRENTLIMIT_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 DATA_END_BIT_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 DATACRC_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 DATATIMEOUT_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 COMMAND_INDEX_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 COMMAND_END_BIT_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 COMMAND_CRC_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0 COMMAND_TIMEOUT_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 AUTO_CMD12_NOT_ISSUED: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 AUTO_CMD12_RESP_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 AUTO_CMD12_INDEX_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 AUTO_CMD12_END_BIT_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 AUTO_CMD12_CRC_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 AUTO_CMD12_TIMEOUT_ERR: 0 = NO_INTERRUPT 1 = INTERRUPT
+0x0 AUTO_CMD12_NOT_EXECUTED: 0 = NO_INTERRUPT 1 = INTERRUPT
+SDMMCA_ADMA_ERR_STATUS_0
+ADMA Error Status Register
+--------------------------------------------------------------
+ADMA_LENGTH_MISMATCH_ERR - ADMA Length Mismatch Error
+This error occurs in the following 2 cases. (1) While Block Count Enable being set, the total data length specified by the
+Descriptor table is different from that specified by the Block Count and
+Block Length. (2) Total data length can not be divided by the block length.
+ADMA_ERR_STATE - ADMA Error State
+This field indicates the state of ADMA when error is occurred during ADMA data
+transfer. This field never indicates "10" because ADMA never stops in this state. ----------------------------------------------------------------------------- |D01 - D00 |ADMA Error State when | Contents of SYS_SDR register | | | error is occurred | | -----------------------------------------------------------------------------| | 00 | ST_STOP (Stop DMA) | Points next of the error descriptor| | 01 | ST_FDS (Fetch Descriptor) | Points the error descriptor |
+```
+
+
+- SDMMCA Registers
+| 10 | Never set this state | (Not used) | | 11 | ST_TFR (Transfer Data) | Points the next of the error | | | | descriptor | -----------------------------------------------------------------------------|
+- Offset: 0x54
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,x000)
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0 ADMA_LENGTH_MISMATCH_ERR: 0 = NO_ERR 1 = ERR 1:0 0x0
+ADMA_ERR_STATE
+SDMMCA_ADMA_SYSTEM_ADDRESS_0
+ADMA System Address Register
+The 32-bit addressing Host Driver uses lower 32-bit of this register (upper 32-bit
+should be set to 0) and shall program Descriptor Table on 32-bit boundary and set 32-bit boundary address to this register. DMA2/3 ignores lower 2-bit of this register and assumes it to be 00b.
+DMA in 64-bit addressing. The 64-bit addressing Host Driver uses all bits of this
+register and shall program Descriptor Table on 64-bit boundary and set 64-bit boundary address to this register. DMA2/3 ignores lower 3-bit of this register and assumes it to be 000b. (1) SDMA
+If Host Version 4.00 Enable is set to 1, SDMA use this register to indicate
+System Address of data location instead of using SDMA System Address
+register (Offset 003-000h). SDMA can be used in 32-bit and 64-bit addressing in Version 4.00. (2) ADMA2 This register holds byte address of executing command of the Descriptor table.
+At the start of
+ADMA2, the Host Driver shall set start address of the Descriptor table. The
+ADMA increments this register address, which points to next line, when every
+fetching a Descriptor line. When the ADMA Error Interrupt is generated, this register shall hold the Descriptor address depending on the ADMA state. (3) ADMA3 This register is set by ADMA3. Host Driver is not necessary to set this register.
+```
+
+
+- SDMMCA Registers
+- The ADMA3 increments address of this register, which points to next line, when
+every time fetching a Descriptor line. When Error Interrupt is generated, this register shall hold the Descriptor address depending on the ADMA state.
+- Offset: 0x58
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:0 0x0
+ADMA_SYSTEM_ADDRESS
+SDMMCA_UPPER_ADMA_SYSTEM_ADDRESS_0
+Upper ADMA System Address Register
+This register is used by 64-bit address descriptor. Upper bits of 64bit address - ADMA system address[63:32] is set in this register
+Offset: 0x5c
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+Bit
+Reset
+Description
+31:0 0x0
+UPPER_ADMA_SYSTEM_ADDRESS
+SDMMCA_PRESET_DEFAULT_AND_INIT_0
+Preset Value Register Indexs
+------------------------------------- 15-14 HwInit Driver Strength Select Value
+Driver Strength is supported by 1.8V signaling bus speed modes. This field
+is meaningless for 3.3V signaling. 11b Driver Type D is Selected 10b Driver Type C is Selected 01b Driver Type A is Selected
+```
+
+
+- SDMMCA Registers
+00b Driver Type B is Selected 13-11 Rsvd Reserved
+- Clock Generator Select Value
+- This bit is effective when Host Controller supports programmable clock
+generator. 1 Programmable Clock Generator 0 Host Controller Ver2.00 Compatible Clock Generator
+- SDCLK Frequency Select Value
+10-bit preset value to set SDCLK Frequency Select in the Clock Control Register is described by a host system.
+- Preset Value for Default Speed and Initialization
+- Offset: 0x60
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00040000 (0b00xx,x000,0000,0100,00xx,x000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:30 0x0
+DRIVE_STRENGTH_VAL_HIGH
+0x0
+CLK_GEN_VAL_HIGH
+25:16 0x4
+SDCLK_FREQ_VAL_HIGH
+15:14 0x0
+DRIVE_STRENGTH_VAL_LOW
+0x0
+CLK_GEN_VAL_LOW
+9:0 0x0
+SDCLK_FREQ_VAL_LOW
+SDMMCA_PRESET_SDR12_AND_HIGH_0
+Preset Value for SDR12 Speed and HIGHSPEED
+Offset: 0x64
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00040002 (0b00xx,x000,0000,0100,00xx,x000,0000,0010)
+Bit
+Reset
+Description
+31:30 0x0
+DRIVE_STRENGTH_VAL_HIGH
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0
+CLK_GEN_VAL_HIGH
+25:16 0x4
+SDCLK_FREQ_VAL_HIGH
+15:14 0x0
+DRIVE_STRENGTH_VAL_LOW
+0x0
+CLK_GEN_VAL_LOW
+9:0 0x2
+SDCLK_FREQ_VAL_LOW
+SDMMCA_PRESET_SDR50_AND_SDR25_0
+Preset Value for SDR50 and SDR25
+Offset: 0x68
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00010002 (0b00xx,x000,0000,0001,00xx,x000,0000,0010)
+Bit
+Reset
+Description
+31:30 0x0
+DRIVE_STRENGTH_VAL_HIGH
+0x0
+CLK_GEN_VAL_HIGH
+25:16 0x1
+SDCLK_FREQ_VAL_HIGH
+15:14 0x0
+DRIVE_STRENGTH_VAL_LOW
+0x0
+CLK_GEN_VAL_LOW
+9:0 0x2
+SDCLK_FREQ_VAL_LOW
+SDMMCA_PRESET_DDR50_AND_SDR104_0
+Preset Value for DDR50 and SDR104
+Offset: 0x6c
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00020000 (0b00xx,x000,0000,0010,00xx,x000,0000,0000)
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+31:30 0x0
+DRIVE_STRENGTH_VAL_HIGH
+0x0
+CLK_GEN_VAL_HIGH
+25:16 0x2
+SDCLK_FREQ_VAL_HIGH
+15:14 0x0
+DRIVE_STRENGTH_VAL_LOW
+0x0
+CLK_GEN_VAL_LOW
+9:0 0x0
+SDCLK_FREQ_VAL_LOW
+SDMMCA_ADMA3_INT_DESC_LOWER_ADDRESS_0
+ADMA3 Integrated Descriptor Address 31:0 Register .
+The start address of Integrated DMA Descriptor is set to this register. Writing to a
+specific address starts ADMA3 depends on 32-bit/64-bit addressing. The ADMA3 fetches one Descriptor Address and increments this field to indicate the next Descriptor address.
+The 32-bit addressing Host Driver uses lower 32-bit of this register and shall
+program Descriptor Table on 32-bit boundary. ADMA3 ignores lower 2-bit of this register and assumes it to be 00b. Writing to 07Bh starts ADMA3 data transfer.
+The 64-bit addressing Host Driver uses all 64-bit of this register and shall
+program Descriptor Table on 64-bit boundary. ADMA3 ignores lower 3-bit of this register and assumes it to be 000b. Writing to 07Fh starts ADMA3 data transfer.
+Register Value Addressing Mode
+00000000_xxxxxxxxh 32-bit System Address xxxxxxxx_xxxxxxxxh 64-bit System Address
+Offset: 0x78
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+Bit
+Reset
+Description
+31:0 0x0
+ADDRESS_31_0
+```
+
+
+- SDMMCA Registers
+- SDMMCA_ADMA3_INT_DESC_UPPER_ADDRESS_0
+- ADMA3 Integrated Descriptor Address 63:32 Register
+- Offset: 0x7c
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:0 0x0
+ADDRESS_63_32
+SDMMCA_VENDOR_REGS_PTR_0
+Pointer Registers to 1FFh-100h Area - vendor specific area
+Area of offset mFFh-m00h is defined as re-locatable area. The locations of following register sets are pointed by offset address. vendor registers start at 100h. => m=1
+Vendor registers pointer
+Offset: 0xe8
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000100 (0bxxxx,xxxx,xxxx,xxxx,xxxx,0001,0000,0000)
+Bit
+Reset
+Description
+11:0 0x100 VENDOR_PTR:
+Vendor regs start at
+0x100 - offset[11:0]=0x100
+SDMMCA_SLOT_INTERRUPT_STATUS_0
+Slot Interrupt Status Register
+--------------------------------------------------------------
+VENDOR_VERSION_NUMBER - Vendor Version Number
+This status is reserved for the vendor version number. The Host Driver
+```
+
+
+- SDMMCA Registers
+should not use this status.
+- SPECIFICATION_VERSION_NUMBER - Specification Version Number
+- This status indicates the Host Controller Spec. Version. The upper and
+lower 4-bits indicate the version. 00 SD Host Specification Version 1.00 01 SD Host Specification Version 2.00
+- Including the feature of the ADMA and Test Register,
+02 SD Host Specification Version 3.00 03 SD Host Specification Version 4.00 04h SD Host Controller Specification Version 4.10 05h SD Host Controller Specification Version 4.20 others Reserved
+- INTERRUPT_SIGNAL_FOR_EACH_SLOT - Interrupt Signal For Each Slot
+- These status bits indicate the logical OR of Interrupt Signal and Wakeup
+- Signal for each slot. A maximum of 8 slots can be defined. If one interrupt
+signal is associated with multiple slots, the Host Driver can know which interrupt is generated by reading these status bits. By a power on reset or by setting Software Reset For All, the interrupt signal shall be de-asserted and this status shall read 00h.
+- Bit 00 Slot 1
+- Bit 01 Slot 2
+- Bit 02 Slot 3
+...... ......
+- Bit 07 Slot 8
+- Offset: 0xfc
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x05050000 (0b0000,0101,0000,0101,xxxx,xxxx,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:24 0x5
+VENDOR_VERSION_NUMBER
+23:16 0x5
+SPECIFICATION_VERSION_NUMBER
+7:0 0x0
+INTERRUPT_SIGNAL_FOR_EACH_SLOT
+SDMMCA_VENDOR_CLOCK_CNTRL_0
+The following Registers are Vendor Specific Registers and are mapped to Vendor Specific Address
+Space(
+0x100 - 0x1FF)
+```
+
+
+- SDMMCA Registers
+- Offset: 0x100
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x0804d06d (0bxx00,1000,0000,0100,1101,0000,x110,1101)
+- PROD: 0x0e080020 (0bxxx0,1110,0000,1000,xxxx,xxxx,x01x,0x0x)
+- Bit
+- Reset
+- PROD
+- Description
+0x0 _NONE_ DIFF_CLK_SEL:
+- If set, selects differential CLK and DQS; Used by eMMC
+IOBRICK only.
+- SW should set this appropriately based on eMMC part
+used. E_INPUT_* (CMD/DAT/CLK) of emmc IOBRICK should be set to 0 when differential signalling is used. default is '0' - selects single ended signalling for clk/dqs 28:24 0x8 0xe TRIM_VAL:
+- Trimmer tap value for the output data path trimmer
+- This determines the trimmer value needed to drive the
+output data correctly.
+- The tap for outbound trimmer is single MUX. The trim
+settings required are within very small (0-3) with absolute delay requirement of ~400ps. Minimal change with PVT variations. 23:16 0x4 0x8 TAP_VAL:
+- Tap value for input data path trimmer
+- This determines the tap value needed to sample the
+input data correctly.
+- Delay per each tap can range from 70ps (hv_ff) to
+505ps (lv_ss). 15:8 0xd0 _NONE_ BASE_CLK_FREQ:
+- SW driver should write core clock frequency value in
+- MHz to this field to advertise base frequency in
+- SDMMCA_CAPABILITIES_0_ BASE_CLOCK_FREQUENCY
+for standard SD driver usage. 0x1
+- NORMAL
+LEGACY_CLKEN_OVERRIDE:
+- Override for sdmmc_legacy_g_clk clken;
+- Set this to 0 to save power
+0 = NORMAL :0 -> sdmmc_legacy_g_clk is gated 1 = OVERRIDE :1 -> sdmmc_legacy_g_clk is not gated 0x1
+- OVERRIDE
+SDR50_TUNING_OVERRIDE: override the SDR50_TUNING capabilities bit.
+- Software should only set this bit if it is required to use
+Tuning for SDR50. (only supported for SDMMC1) 0 = NORMAL :0 -> No Tuning support advertised for SDR50 mode. 1 = OVERRIDE :1 -> Tuning support is enabled for SDR50 mode.
+
+- SDMMCA Registers
+- Bit
+- Reset
+- PROD
+- Description
+0x0 _NONE_ UHS2_CAPABILITY_OVERRIDE: override the UHS-II capabilities bit. 0x1 0x0 PADPIPE_CLKEN_OVERRIDE: Override for padmacro and pipemacro clken. 0 = NORMAL :0 -> CLKEN is de-asserted when internal CLKEN is de-asserted. 1 = OVERRIDE :1 -> CLKEN is kept asserted even when internal CLKEN is de-asserted. 0x1 _NONE_ SPI_MODE_CLKEN_OVERRIDE: This mode is not supported in Tegra. 0x0
+- FEEDBACK
+INPUT_IO_CLK: Feedback clock is selected by default. Software should not change this.
+- Disabling Feedback clock will select Internal Clock that
+requires different TAP Value Programming. 0 = FEEDBACK 1 = INTERNAL 0x1 _NONE_ SDMMC_CLK:
+- This is set when sdmmc_clk is supplied by the CAR
+module. Prior to sdmmc_clk switch OFF, this bit should be written as '0'.
+- By writing zero,the asynchronous card interrupt is
+routed to the Interrupt controller. 0 = DISABLE 1 = ENABLE
+- SDMMCA_VENDOR_SYS_SW_CNTRL_0
+- Offset: 0x104
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x38600002 (0b0011,1000,011x,xxxx,x000,0000,x000,0010)
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0 ENHANCED_STROBE_MODE:
+Enables enhanced strobe mode in HS400 mode for eMMC5.x devices
+0 - cmd_in(Resp) is sampled by loopback clock which requires tuning 1 - cmd_in(Resp) is sampled by DQS_in which requires no tuning
+SW has to set this bit appropriately based on device capability since this is
+an optional feature for eMMC5.x devices. If device supports this feature, SW should set this bit to avoid tuning.
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0 USE_TMCLK_FOR_WR_CRC_STATUS_TIMEOUT:
+When set, uses TMCLK data timeout counter for generating
+wr_crc_status data-timeout
+When cleared, uses sdmmc_clk for maintaining wr_crc_status data
+timeout counter 0x1 USE_NCRC_FOR_WR_CRC_STATUS_TIMEOUT_VAL:
+This field is valid only when USE_TMCLK_FOR_WR_CRC_STATUS_TIMEOUT
+is set to 0.
+When cleared, uses data timeout value as wr crc status timeout value
+(spec defined one)
+When set, uses Ncrc cycles as timeout value
+0x1 USE_TMCLK_FOR_DATA_TIMEOUT:
+When set, uses TMCLK data timeout counter for generating legacy data
+timeout error (except wr_crc_status timeout)
+When cleared, uses sdmmc_clk for maintaining data timeout counter
+27:24 0x8 DEVICE_BUSY_WAIT_CYCLES:
+This register field is used to load wait_cycles counter before device busy
+sampling in HS400 mode. Please note that this counter is used only in HS400 mode. 0x0 ALLOW_CARD_CLK_STALLS_IN_WR:
+When set, allows card clock stopping during transfer of data within a
+block in DDR52/HS400 writes.
+0x1 EMMC_IOBRICK_CLK_DATA: Used to drive AP_CLK and AN_CLK input of iobrick.
+0x1 - clk_out will be same as iobrick_clk_in
+0x0 - clk_out will be inverted iobrick_clk_in
+0x1 QUALIFY_WITH_RD_DATA_VLD:
+We have async FIFOs in both cmd_in and dat_in paths in padmacro which
+are used in tunable modes.
+When this bit set, rdata from FIFO is treated as valid data only when
+rd_req is high. This is needed to handle bubbles on 'rd_req' when MTBF is high. 0x0 SD_BUS_POWER_ON_OFF_INT_STATUS:
+SD_BUS_POWER was changed. System software can use this interrupt to
+implement power switch. 0x0 VOLT_SWITCH_INT_STATUS:
+VOLT_18_EN was changed. System software can use this interrupt to
+implement a UHS-I voltage switch procedure for a standard SD Host driver 0 = NO_INT 1 = GEN_INT 0x0 TUNING_SYS_INT_STATUS:
+CMD19 was issued while EXECUTE_TUNING was set. System software can
+use this interrupt to implement a UHS-I tuning procedure for a standard SD Host driver. 0 = NO_INT 1 = GEN_INT
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+11:8 0x0 TUNING_ASYNC_FIFO_ADDNL_DELAY:
+This register field holds the additional delay in cycles which should be
+added to round trip delay Default value is - zero. SW should not update this field unless a new PROD setting is given. 0x0 SD_BUS_POWER_ON_OFF_INT_ENABLE:
+Enables a seperate system interrupt (i.e., not the standard SDHCI
+interrupt) when SD_BUS_POWER is changed. 0 = DISABLE 1 = ENABLE 0x0 VOLT_SWITCH_INT_ENABLE:
+Enables a seperate system interrupt (i.e., not the standard SDHCI
+interrupt) when VOLT_18_EN is changed. 0 = DISABLE 1 = ENABLE 0x0 TUNING_SYS_INT_ENABLE:
+Enables a seperate system interrupt (i.e., not the standard SDHCI
+interrupt) when CMD19 is issued while EXECUTE_TUNING is set. 0 = DISABLE 1 = ENABLE 0x0 ASSERT_BUFF_RD_RDY_INT:
+Write a 1 to this field to assert
+sdmmc_interrupt_status_0_buffer_read_ready. Used by the system software that implements the tuning procedure to signal to the standard
+SD driver that the tuning process has completed
+0 = DISABLE 1 = ENABLE 0x0 IO_TRIM_BYPASS:
+Override bit for selecting between core trimmer (Vcore dependent) and io
+trimmer (custom trimmer) in IB clock path Default option is IO trimmer; SW should not set this field. 0x1 INT_MASK_WHILE_TUNING:
+As per spec, Host should not generate any interrupts (including
+cmd_complete and data_xfer_complete) except buffer_read_ready interrupt during tuning sequence is being performed
+SW can override this behavior by clearing this bit - but this leads to a spec
+violation 0 = DISABLE 1 = ENABLE 0x0 SPI_MODE: This mode is not supported in Tegra.
+SDMMCA_VENDOR_ERR_INTR_STATUS_0
+Legacy Interrupt Status Register
+```
+
+
+- SDMMCA Registers
+The fields are valid when a error interrupt has occurred.
+- Offset: 0x108
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x000X0000 (0bxxxx,xxxx,xxxx,xx00,0000,xxx0,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+X SDMMC_LEGACY_CTLR_IDLE: indicates legacy SD interface controller is idle - no active data transfers on legacy SD interface
+0x0 READ_DATA_TIMEOUT: valid when a data timeout error occurs
+0x0 WRITE_CRC_STATUS_TIMEOUT: valid when a data timeout error occurs
+0x0 WRITE_BUSY_TIMEOUT: valid when a data timeout error occurs
+0x0 RESP_BUSY_TIMEOUT: valid when a data timeout error occurs 0x0
+SPI_WRITE_BUSY_TIMEOUT
+0x0
+SPI_RX_START_TOKEN_TIMEOUT
+8:5
+0x0 SPI_DAT_ERR_TOKEN: Data Error Token,while read from card. 4:0
+0x0 SPI_DAT_RESPONSE:
+Data Response while write to card
+5 = DATA_ACCEPTED 11 = CRC_ERR 13 = WRITE_ERR
+SDMMCA_VENDOR_CAP_OVERRIDES_0
+Capabilities override bits
+Offset: 0x10c
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00001107 (0bxxxx,xxxx,xxxx,xxxx,xx01,0001,xxxx,0111)
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+13:8 0x11 DQS_TRIM_VAL:
+Tap value for incoming DQS path trimmer - used in HS400 modes
+0x0 DRV_LPBK_CLK_ON_CMD_LINE: Loopback trimmed clock will be driven onto cmd line, if this bit set to 1. Should be set to zero during normal data transfers. Useful in debug.
+0x1 VOLTAGE_3_3_V_SUPPORT_OVERRIDE:
+Voltage support 3_3_V override
+0x1 VOLTAGE_3_0_V_SUPPORT_OVERRIDE:
+Voltage support 3_0_V override
+0x1 VOLTAGE_1_8_V_SUPPORT_OVERRIDE:
+Voltage support 1_8_V override
+SDMMCA_VENDOR_DEBOUNCE_COUNT_0
+Debounce Counter Value Register
+The Debounce Counter runs on 32 KHz clock. Keeping the default value to 100ms = ( 100 *
+32cycles/1ms) = 3200 cycles for 100ms = 0xC80
+Offset: 0x11c
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000c80 (0bxxxx,xxxx,0000,0000,0000,1100,1000,0000)
+Bit
+Reset
+Description
+23:0 0xc80 VALUE:
+The number of 32KHz clock cycles is programed to meet Debounce
+period of the card slot.This register is valid for only SDMMC1.
+SDMMCA_VENDOR_MISC_CNTRL_0
+Misc Vendor Cntrl Register
+SDMMC_SPARE0: Spare register bits with reset value of 0
+SDMMC_SPARE0[0] : SW_RESET_CLKEN_OVERRIDE, override the sdmmc_clken when doing
+SW_RESET if set to 1. SDMMC_SPARE0[1] : When set, allows SD clock to be stopped in the middle of a read data block while in SDR104/HS400 modes(allow_sdr104_intrablock_stalls). Unsafe for some SD/eMMC cards, but may improve SDR104 DMA read performance in some cases.
+```
+
+
+- SDMMCA Registers
+- SDMMC_SPARE0[2] : When set, SDR104 support is advertised in
+- SDMMC_CAPABILITIES_HIGHER_0_SDR104
+- SDMMC_SPARE0[3] : When set, SDR50 support is advertised in
+- SDMMC_CAPABILITIES_HIGHER_0_SDR50
+- SDMMC_SPARE0[5] : When 0, masks the pad macro's "high speed" enable to 0, causing the pad
+macro to always launch data on the falling edge of the clock. This prevents the SD Host driver's setting of
+- SDMMC_POWER_CONTROL_HOST_x_HIGH_SPEED_EN from undesireably affecting the output
+timing. SDMMC_SPARE0[7:6] : Number of pipe stages.
+- SDMMC_SPARE0[8] : When set, DDR50 support is advertised in
+SDMMC_CAPABILITIES_HIGHER_0_DDR50.
+- SDMMC_SPARE1: Spare register bits with reset value of 1
+- SDMMC_SPARE1[0] : Reserved
+- SDMMC_SPARE1[1] : Reserved
+- Offset: 0x120
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0xffff0098 (0b1111,1111,1111,1111,0000,0000,1001,1000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:16 0xffff SDMMC_SPARE1:
+Spare register bits with reset value of 1
+15:1 0x4c SDMMC_SPARE0:
+Spare register bits with reset value of 0x4C
+0x0 ERASE_TIMEOUT_LIMIT: Erase timeout value. 0 = FINITE :Finite,It is limited to the programmed value in the
+DATA_TIMEOUT_VALUE
+1 = INFINITE :Infinite,Controller would be monitoring until the card is busy.
+SDMMCA_VENDOR_MISC_CNTRL1_0
+Offset: 0x124
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000000 (0bxxxx,xxxx,0000,0000,0000,0000,0000,0000)
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+23:16 0x0 OVERRIDE_FOR_1_8V:
+Maximum override for 1.8V VDD1
+15:8 0x0 OVERRIDE_FOR_3_0V:
+Maximum override for 3.0V VDD1
+7:0 0x0 OVERRIDE_FOR_3_3V:
+Maximum override for 3.3V VDD1
+SDMMCA_VENDOR_MISC_CNTRL2_0
+Offset: 0x128
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x62600000 (0b0110,001x,x11x,0000,0000,0000,0000,0000)
+PROD: 0x00000000 (0bx0xx,xx0x,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx)
+Bit
+Reset
+PROD
+Description
+0x0 _NONE_ VGPIO_MODE_EN:
+SW should set this to 1 when CD and WP pins are
+connected to external PMIC/VGPIO and not connected to
+SoC pins
+0x1
+0x0 SDMMC_CLK_OVR_ON:
+Master clk en Override bit for all SLCGs
+0x1 _NONE_ SD_CARD_DETECT_STATUS_N:
+SW should read CD_N status from external PMIC/VGPIO
+controller and update this field to get SDMMC present state register gets updated.
+Present state register is read by standard SDHC driver to
+know card status. 0 - card detected 1 - no card present in slot 0x0 _NONE_ SD_CARD_WP_STATUS:
+SW should read Write Protect status from external PMIC/
+VGPIO controller and update this field to get SDMMC
+present state register gets updated.
+Present state register is read by standard SDHC driver to
+know card status. 0 - card is not write protected 1 - card is write protected 0x0 _NONE_ CMD_TFIFO_HOT_RESET:
+SW can reset CMD tuning FIFO present in padmacro
+incase there is any error or hang condition.
+Reset duration should be atleast 20 cycles. Set this bit to
+1 and clear it after 20 cycles to reset FIFO.
+```
+
+
+- SDMMCA Registers
+- Bit
+- Reset
+- PROD
+- Description
+0x0 _NONE_ DAT_TFIFO_HOT_RESET:
+- SW can reset DAT tuning FIFO present in padmacro incase
+there is any error or hang condition.
+- Reset duration should be atleast 20 cycles. Set this bit to
+1 and clear it after 20 cycles to reset FIFO. 0x1
+- NORMAL
+ADMA3_CLKEN_OVERRIDE:
+- Override for sdmmc_adma3_g_clk clken;
+0 = NORMAL :0 -> sdmmc_adma3_g_clk is gated in nonADMA3 modes 1 = OVERRIDE :1 -> sdmmc_adma3_g_clk is not gated in nonADMA3 modes 0x1 _NONE_ ADMA3_DESC_PREFETCH_EN:
+- When set to 1, enables ADMA3 descriptors pre-fetch
+feature. It helps improving perf when system memory is heavily fragmented (number of descriptors programmed per transfer will be more) 0x1 _NONE_ ADMA2_DESC_PREFETCH_EN:
+- When set to 1, enables ADMA2 descriptors pre-fetch
+feature. It helps improving perf when system memory is heavily fragmented (number of descriptors programmed per transfer will be more) 19:16 0x0 _NONE_ DATA_TIMEOUT_VAL_MULTIPLIER:
+- Used when SDMMC IO clock is used instead TMCLK for
+running data timeout counter (USE_TMCLK_FOR_DATA_TIMEOUT is set in VENDOR_SYS_SW_CNTRL register).
+- Effective data timeout val = (multiplier+1) *
+data_timeout_val 0 - no multiplier 15:12 0x0 _NONE_ DAT_TUNING_ASYNC_FIFO_ADDNL_DELAY:
+- This register field holds the additional delay in cycles
+which should be added to wdata/crc token round trip delay Default value is - zero.
+- NOTE: SW should not update this field unless a new PROD
+setting is given. 11:8 0x0 _NONE_ ADDITIONAL_NCR_CYCLES:
+- Additional Ncr wait time - useful for HW debug
+Default is 0 - SW should not modify this. 7:0 0x0 _NONE_ OVERRIDE_FOR_1_8V_VDD2:
+- Maximum override for 1.8V VDD2
+- SDMMCA_VENDOR_IO_TRIM_CNTRL_0
+- Vendor IO trimmer control register
+- Used to configure IO trimmer
+- Truth table
+- Input Pins Output Comments
+
+- SDMMCA Registers
+E_DPD SEL_VREG SEL_VREF CLKOUT 1 x x 0 The cell is in deep power down mode 0 1 x based on ip_clk_select selected clock input Trimmer is powered by VAUXC 0 0 x based on ip_clk_select selected clock input Trimmer is powered by regulated voltage
+- 'x' indicates don't care
+- Offset: 0x1ac
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000205 (0b0000,xxxx,xxxx,xxxx,xxxx,x010,000x,x101)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:28 0x0 TRIM_PAD_RFU_IN: Unused comp pad input pins. Reserved for future usage. 10:8
+VREF_750_MV
+SEL_VREF_LEVEL:
+Selects Vref voltage level
+0 = VREF_700_MV 1 = VREF_725_MV 2 = VREF_750_MV 3 = VREF_775_MV 4 = VREF_800_MV 5 = VREF_850_MV 6 = VREF_900_MV 7 = VREF_950_MV 7:6 0x0 TRIM_SEL_ATEST:
+For testing purpose only - should be used when sdmmc is in idle
+state Select analog test signals to send to comp pad. 0x0: Not used (float) 0x1: Regulator input voltage 0x2: Regulator output voltage before analog mux 0x3: Regulator output after analog mux
+ENABLE
+TRIM_PWRSAVE:
+Enables power saving mode by clock gating the unused taps in
+delay chain
+Active low signal,
+0 - power saving mode enabled - clock gating is enabled for unused trimmer taps - may affect tap delay 1 - no power saving - all the trimmer taps are not clock gated 0 = ENABLE 1 = DISABLE
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x1 SEL_VREG: By default, BG is disabled to save power if interface is not used. SW should select BG for error free SD/eMMC operation.
+For BG <-> VAUXC switching, SW should follow the switching
+sequence given in TRM/IAS.
+Select voltage supply for delay chain present in both Trimmer and
+DLLs
+PROD value: 0x0
+**SW should set this to 0x0 before accessing SD/eMMC. This
+setting makes IB trimmer delay independent of VDD_CORE*** 0 - selects regulated reference voltage for trimmer supply - default (recommended option for tunable SD/eMMC modes) 1 - selects VAUXC for trimmer supply and shut down BG+REG circuit (can be used in nonTunable modes for power saving) Power up time for BG+REG is ~3us(worst case). Power down time for BG+REG is ~1us(worst case).
+If SW wants to turn on/off BG+REG when SDMMC is idle, it has to
+take hit of 3us power on time.
+When SEL_VREG is toggled, both DLL and rx clock trimmer output
+could glitch irrespective of input clock state which could cause corresponding rx CMD and DATA FIFOs to go into bad state.
+SW should issue SW_RESET_DAT and SW_RESET_CMD to reset
+host FIFOs after BG <-> VAUXC switching. This would ensure error free data tranfers from there on.
+Powering down BG would need 3usec turn ON time which may
+cause IOPS reduction, if SW shut downs BG after every transfer and enables it on seeing new xfer req. Hence, it may not be possible to do dynamic shut down of BG without stalling new requests. 0x0 SEL_VREF:
+Select reference voltage for voltage regulator
+0 - selects Bandgap Voltage Reference (recommended option for
+SD/eMMC tunable modes)
+1 - selects resistor divider voltage reference and power down bandgap
+Switching time between the supplies is 1us. When switching from
+one supply to other supply, we need to wait for atleast 1us before doing any data transfers.
+Providing reference voltage from R divider network is just a
+backup plan, if A. Bandgap does not work or B. Bandgap works very well but we want to save bandgap power when Silicon Characterization results shows that the eMMC/
+SDMMC interface
+perform well even by using R divider+REG+TRIMMER
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x1 PD_BGREG:
+Not used - Dummy control
+Power down Band Gap voltage reference, voltage regulator and
+resistor chain voltage ref (BG+REG) present in custom IO trimmer used for SD/eMMC bus tuning.
+Active High signal, PD_BGREG=1 => Power down BG+REG;
+PD_BGREG=0 => power up
+Power down and up time for BG+REG is 1us. If SW wants to turn
+on/off BG+REG when SDMMC is idle, it has to follow 1us power on/off time.
+Back-up option for powering down BG. SW should clear this bit
+when it wants to turn ON BG by setting SEL_VREG=0.
+The original idea to have PD_BGREG pin is to provide power saving
+feature when the eMMC/SDMMC is in IDLE state, but not in DPD mode.
+This pin function is actually merged into SEL_VREG function
+-BG+REG circuit is shut-down when SEL_VREG=1 ( trimmer powered by VAUXC )
+SDMMCA_VENDOR_TUNING_CNTRL0_0
+Vendor Tuning Control0 register
+Offset: 0x1c0
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x74020090 (0bx111,0100,0000,001x,0000,0000,1001,0000)
+PROD: 0x00000040 (0bxxxx,xxxx,xxxx,xxxx,xxx0,0000,01xx,xxxx)
+Bit
+Reset
+PROD
+Description
+0x1 _NONE_ RD_DATA_CRC_ERR_EN:
+If cleared, Re-tuning request/tuning error is not
+generated on read data crc error 0x1 _NONE_ WR_DATA_CRC_ERR_EN:
+If cleared, Re-tuning request/tuning error is not
+generated on write crc error 0x1 _NONE_ CMD_CRC_ERR_EN:
+If cleared, Re-tuning request/tuning error is not
+generated on cmd crc error 0x0 _NONE_ RETUNING_REQ_EN_ON_CRC_ERR_DETECTION:
+Re-tuning request is generated when set to initiate re-
+tuning by SW to compensate for temperature drift when any data or cmd CRC errors are detected in SDR50/SDR104/HS200 modes
+```
+
+
+- SDMMCA Registers
+- Bit
+- Reset
+- PROD
+- Description
+0x1 _NONE_ TUNING_ERR_EN_ON_CRC_ERR_DETECTION:
+- Tuning error is generated to initiate re-tuning by SW
+to compensate for temperature drift when any data or cmd CRC errors are detected in
+- SDR50/SDR104/HS200 modes
+25:18 0x0 _NONE_ START_TAP_VAL: start tap value to be used by tuning; start_tap should be multiple of step_size chosen and its valid range is 0-255;
+- Not valid when TAP_VAL_UPDATED_BY_HW is set to
+zero.
+- Tuning algorithm uses this as the start tap value for
+scanning through trimmer taps. 0x1 _NONE_ TAP_VAL_UPDATED_BY_HW:
+- This bit is functional only in tunable modes (SDR50,
+- SDR104 and HS200)
+- SW can choose to update the tap val by itself by
+clearing this bit; Preferred value is 1 - tap val is updated by HW. If this bit is cleared, HW does not update tap_val per every tuning iteration. SW can update it as desired.
+- Tuning pattern match is indicated by
+sampling_clock_select per every tuning iteration.
+- SW has to maintain the status of each tuning iteration
+and determine the best PASS window to fix the final sampling point. And SW can program NUM_TUNING_ITERATIONS as desired.
+- Once the number of tuning commands issued reaches
+number of tuning iterations programmmed, execute_tuning bit will be cleared to indicate the completion of tuning procedure.
+- Please note that using this option violates Host Spec
+but provided for legacy reasons.
+- It helps us in using legacy SW tuning solution incase
+HW solution does not work. 15:13
+- TRIES_40
+_NONE_ NUM_TUNING_ITERATIONS:
+- The number of tuning iterations to be used by tuning
+circuit. 0 = TRIES_40 1 = TRIES_64 2 = TRIES_128 3 = TRIES_192 4 = TRIES_256 12:6 0x2 0x1 MUL_M: implements a multipler - M+1
+- Final tap value is derived from best passing window
+and calculated as follows.
+- Final tap value = first_pass + ( (last_pass -
+first_pass)*Q); where Q = percentage of pass window;default-75% Q = M+1/(2^N); N:1...7 M:should be in range [0:2^N-1]; 5:3 0x2 _NONE_ DIV_N: implements a divider - 2^N; max div is 2^7 =>128
+
+- SDMMCA Registers
+- Bit
+- Reset
+- PROD
+- Description
+2:0 0x0 _NONE_ TUNING_WORD_SEL:
+- Selects desired word from 256-bit tuning status
+bitmap status_word[31:0] = status[255:0] >> ( tuning_word_sel * 32)
+- SDMMCA_VENDOR_TUNING_CNTRL1_0
+- Vendor Tuning Control1 register
+- Different step size is required in SDR50 mode to cover two UI (100MHz => 2*10ns)
+- With 70ps/tap trimmer resolution, we can cover almost 2UI using step_size=8 in SDR50 and
+step_size=4 in SDR104. Tuning will be done in HS200 - SDR mode only.
+- HS200 - tuning @200MHz - UHS_SEL should be SDR104 for executing tuning
+Before initiating data transfers in HS400 mode, tuning procedure should be executed in HS200 mode with IO clock running @200MHz DQ_OFFSET: offset between even and odd bits. Td is per-tap delay in trimmer. When the DQ offset function is turned off (DQ_OFFSET[1:0]=00), there is no offset between ZI0~7. When the DQ offset function is turned on (DQ_OFFSET[1:0]=01, 10, 11), extra delays are added at the odd bits (DQ1, 3, 5,7). Thus, there is an offset between even bits and odd bits. DQ offset function is turned on during auto-tuning to avoid the window-merged issue and turned off during normal operation. 00 no offset 01 1*Td 10 2*Td 11 3*Td
+- Offset: 0x1c4
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000400 (0b00xx,xxxx,xxxx,xx00,0000,0100,x000,x000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:30
+0x0 DQ_OFFSET: offset between even and odd bits
+0x0 FIRST_PASS_WINDOW_SEL:
+This enables the selection of the first pass window by the HW tuning
+engine. First pass window select feature is enabled only when STEP_SIZE is set to 0.
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0 FALSE_PASS_MASK:
+This enables masking of the false pass windows from the tap value
+selection. False pass mask feature is enabled only when STEP_SIZE is set to 0. 15:8 0x4 MIN_PASS_WINDOW_WIDTH:
+This is used to mask false passes.Tuning engine considers PASS
+windows of size > MIN_WIDTH for tap value calculation. Allowed range is 1<= MIN_PASS_WINDOW_WIDTH <=4. 6:4 0x0 STEP_SIZE_SDR104_HS200: tap_val is incremented by step_size for every tuning iteration - used in
+SDR104/HS200/HS400 mode
+increment = 2^step_size; step_size should be in range 0-4. Others are
+RSVD
+2:0 0x0 STEP_SIZE_SDR50: tap_val is incremented by step_size for every tuning iteration - used in
+SDR50 mode
+increment = 2^step_size; step_size should be in range 0-4. Others are
+RSVD
+SDMMCA_VENDOR_TUNING_STATUS0_0
+Vendor Tuning Status0 register
+Offset: 0x1c8
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+Bit
+Reset
+Description
+31:0 0x0 STATUS_WORD:
+Each bit indicates the status of each tuning iteration, when tap value is
+updated by HW (TAP_VAL_UPDATED_BY_HW=1); 0-Tuning pattern not matched 1-tuning pattern matched
+We have a total of 256 tap values. SW can issue a max.of 256 tuning
+commands for debug.
+SW needs to read this register eight times to get status of all 256
+iterations by changing tuning_word_sel status[255:0] is left shifted and loaded into this register every time when tuning_word_sel is changed status_word[31:0] = status[255:0] >> ( tuning_word_sel * 32)
+SDMMCA_VENDOR_TUNING_STATUS1_0
+Vendor Tuning Status1 register
+```
+
+
+- SDMMCA Registers
+- Offset: 0x1cc
+- Read/Write: RO
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:24 0x0 PASS_WINDOW_END_BEFORE_FINE_TUNING:
+End tap value of best PASS window found by scan FSM
+23:16 0x0 PASS_WINDOW_START_BEFORE_FINE_TUNING:
+Start tap value of best PASS window found by scan FSM
+15:8 0x0 PASS_WINDOW_END_AFTER_FINE_TUNING:
+End tap value of best PASS window after fine tuning
+7:0 0x0 PASS_WINDOW_START_AFTER_FINE_TUNING:
+Start tap value of best PASS window after fine tuning
+SDMMCA_VENDOR_CLK_GATE_HYSTERESIS_COUNT_0
+Vendor Clk gating Hysteresis Counter initial value
+Offset: 0x1d0
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x0000000f (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00,1111)
+Bit
+Reset
+Description
+5:0 0xf CLK_COUNT:
+Before gating second level clocks controller will wait for these many
+cycles. we can recover if any idle windows are missed in clken equation
+SDMMCA_VENDOR_PRESET_VAL0_0
+Vendor Preset Value Registers
+SD host spec defines one preset value register for each bus speed mode which should be set by host by some unique method. Preset values vary based on the base frequency used which is in SW (SoC system driver) control.
+System driver supposed to set BASE_CLK_FREQ in VENDOR_CLOCK_CNTRL register before
+handling over the control to SD host standard driver. In the similar way, system driver should set below vendor preset values based on the base clock
+```
+
+
+- SDMMCA Registers
+frequency and the desired card clock frequency in each bus speed mode This should be done after every time SDMMC is reset and after every soft reset.
+- This is important as all SDMMC controllers follow the same register map, but could
+be programmed with different frequencies depending on the use case. Default values are set assuming base clock frequency=208 MHz.
+- Offset: 0x1d4
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00201000 (0bxx00,0000,0010,0000,0001,0000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+29:20 0x2 SDCLK_FREQ_SEL_HIGH_SPEED:
+System software programs 10-bit divider value to generate SD clk in
+default speed mode (<50MHz,3.3Vsignaling)
+This value is readable in the standard via
+PRESET_SDR12_AND_HIGH_0_SDCLK_FREQ_VAL_LOW register field
+Default val is 0x2 assuming 208MHz base clock
+19:10 0x4 SDCLK_FREQ_SEL_DEFAULT:
+System software programs 10-bit divider value to generate SD clk in
+default speed mode (<25MHz,3.3Vsignaling)
+This value is readable in the standard via
+PRESET_DEFAULT_AND_INIT_0_SDCLK_FREQ_VAL_HIGH register field
+Default val is 0x4 assuming 208MHz base clock
+9:0 0x0 SDCLK_FREQ_SEL_INIT:
+System software programs 10-bit divider value to generate desired SD
+clk frequency during initialization
+This value is readable in the standard via
+PRESET_DEFAULT_AND_INIT_0_SDCLK_FREQ_VAL_LOW register field
+For Eg., if 400KHz SDCLK is desired @base clk freq=48MHz, this
+register should be programmed with 0x3C
+SDMMCA_VENDOR_PRESET_VAL1_0
+Offset: 0x1d8
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00100804 (0bxx00,0000,0001,0000,0000,1000,0000,0100)
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+29:20 0x1 SDCLK_FREQ_SEL_SDR50:
+System software programs 10-bit divider value to generate SD clk in
+SDR50 mode (<100MHz,1.8Vsignaling)
+This value is readable in the standard via
+PRESET_SDR50_AND_SDR25_0_SDCLK_FREQ_VAL_HIGH register
+field
+Default val is 0x1 (gives 2N divider) assuming 208MHz base clock
+19:10 0x2 SDCLK_FREQ_SEL_SDR25:
+System software programs 10-bit divider value to generate SD clk in
+SDR25 mode (<50MHz,1.8Vsignaling)
+This value is readable in the standard via
+PRESET_SDR50_AND_SDR25_0_SDCLK_FREQ_VAL_LOW register
+field
+Default val is 0x2 assuming 208MHz base clock
+9:0 0x4 SDCLK_FREQ_SEL_SDR12:
+System software programs 10-bit divider value to generate SD clk in
+SDR12 mode (<25MHz,1.8Vsignaling)
+This value is readable in the standard via
+PRESET_SDR12_AND_HIGH_0_SDCLK_FREQ_VAL_HIGH register field
+SDMMCA_VENDOR_PRESET_VAL2_0
+Offset: 0x1dc
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000800 (0bxxxx,xxxx,xxxx,0000,0000,1000,0000,0000)
+Bit
+Reset
+Description
+19:10 0x2 SDCLK_FREQ_SEL_DDR50:
+System software programs 10-bit divider value to generate SD clk in
+DDR50 mode (<50MHz,1.8Vsignaling)
+This value is readable in the standard via
+PRESET_DDR50_AND_SDR104_0_SDCLK_FREQ_VAL_HIGH register
+field
+Default val is 0x2 assuming 208MHz base clock
+9:0 0x0 SDCLK_FREQ_SEL_SDR104:
+System software programs 10-bit divider value to generate SD clk in
+SDR104 mode (<208MHz,1.8Vsignaling)
+This value is readable in the standard via
+PRESET_DDR50_AND_SDR104_0_SDCLK_FREQ_VAL_LOW register
+field
+SDMMCA_SDMEMCOMPPADCTRL_0
+SDMEMCOMP Pad control register
+This register is used to control COMP pad inputs.
+```
+
+
+- SDMMCA Registers
+- Offset: 0x1e0
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x08000000 (0b00x0,1xx0,0000,xxx0,0000,0000,0000,0000)
+- PROD: 0x00007000 (0bxxxx,xxxx,xxxx,xxx0,0111,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- PROD
+- Description
+0x0 _NONE_ PAD_E_INPUT_OR_E_PWRD: used to control E_INPUT(for SDMMC1/3) and E_PWRD (for SDMMC4) input of pu/pd comp pad should be set at least 1usec before starting auto-cal and cleared once auto-calibration is done (for power saving)
+- NOTE: E_PWRD = !PAD_E_INPUT_OR_E_PWRD and
+E_INPUT = PAD_E_INPUT_OR_E_PWRD 0x0 _NONE_ COMP_PAD_E_PBIAS_BUF:
+- Active high. Enables internally generated bias levels for
+driver PMOS.
+- We dont use this feature for SDMMC pads. SW *should
+not* set this bit. Keeping reg for debug purpose. 28:27 0x1 _NONE_ COMP_PAD_DRV_TYPE: used to control drv_type input of BDSDMEMLVCOMP_C pad 24:20 0x0 _NONE_ COMP_PAD_DRVUP_OVR: used to drive DRVUP input of COMP pad if
+- AUTO_CAL_ENABLE is disabled
+16:12 0x0 0x7 COMP_PAD_DRVDN_OVR: used to drive DRVDN input of COMP pad if
+- AUTO_CAL_ENABLE is disabled
+0x0 _NONE_ COMP_PAD_E_TEST_OUT: used to control e_test_out input of COMP pad 10:7 0x0 _NONE_ COMP_PAD_RFU_IN: Unused comp pad input pins. Reserved for future usage. 6:4 0x0 _NONE_ COMP_PAD_TEST_SEL: used to control test_sel input of COMP pad 3:0 0x0 _NONE_ SDMMC2TMC_CFG_SDMEMCOMP_VREF_SEL:
+- Select different bias levels for driver PMOS when
+E_PBIAS_BUF=1.
+- We dont use this feature for SDMMC pads. SW *should
+not* set this bit. Keeping reg for debug purpose.
+- SDMMCA_AUTO_CAL_CONFIG_0
+
+- SDMMCA Registers
+- SDMEMCOMP pad auto-calibration settings
+- AUTO_CAL_SLW_OVERRIDE
+0 (Normal operation) pad DRVDN/UP_SLWR/F tied to AUTO_CAL output
+- DRDVDN/UP_SLWR/F[1:0] = AUTO_CAL_PULLDOWN/UP[4:3]
+1 (override) use CFG2TMC_SDIO[1|3]*_DRVDN/UP_SLWR/F pins to control pad slew inputs
+- AUTO_CAL_OVERRIDE
+0 (normal operation): use AUTO_CAL_PU/PD_OFFSET as an offset to the calibration state machine setting 1 (override) : use AUTO_CAL_PU/PD_OFFSET register values directly
+- Offset: 0x1e4
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00010000 (0b0000,xxxx,xxxx,x001,xxx0,0000,xxx0,0000)
+- PROD: 0x20000000 (0bxx1x,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx)
+- Bit
+- Reset
+- PROD
+- Description
+0x0 _NONE_ AUTO_CAL_START:
+- Writing a one to this bit starts the calibration state
+machine. This bit must be set even if the override is set in order to latch in the override value. 0x0 _NONE_ AUTO_CAL_OVERRIDE: AUTOCAL override. 0 = NORMAL :0 (normal operation): use
+- AUTO_CAL_PU/PD_OFFSET as an offset
+to the calibration state machine setting 1 = OVERRIDE :1 (override) : use AUTO_CAL_PU/
+- PD_OFFSET register
+values directly
+- DISABLED
+- ENABLED
+AUTO_CAL_ENABLE: AUTOCAL enable. 0 = DISABLED :0 (disabled): use sdmmc2tmc_cfg* register settings for pullup/dn 1 = ENABLED :1 (normal operation): use SDMMC generated pullup/dn (override or AUTOCAL) 0x0 _NONE_ AUTO_CAL_SLW_OVERRIDE:
+- AUTOCAL slew rate override
+0 = NORMAL :0 (Normal operation) pad DRVDN/
+- UP_SLWR/F tied to AUTO_CAL output
+- DRDVDN/UP_SLWR/F[1:0] = AUTO_CAL_PULLDOWN/
+- UP[4:3]
+1 = OVERRIDE :1 (override) use CFG2TMC_SDIO[1| 3]*_DRVDN/UP_SLWR/F pins to control pad slew inputs 18:16 0x1 _NONE_ AUTO_CAL_STEP: calibration step interval (in microseconds)
+
+- SDMMCA Registers
+- Bit
+- Reset
+- PROD
+- Description
+12:8 0x0 _NONE_ AUTO_CAL_PD_OFFSET: 2's complement offset for pull-down value 4:0 0x0 _NONE_ AUTO_CAL_PU_OFFSET: 2's complement offset for pull-up value
+- SDMMCA_AUTO_CAL_INTERVAL_0
+- SDMEMCOMP pad calibration interval
+- Offset: 0x1e8
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0b0000,0000,0000,0000,0000,0000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+31:0 0x0 AUTO_CAL_INTERVAL: 0: do calibration once
+Otherwise, auto-calibration occurs at intervals equivalent
+to the programmed number of microseconds.
+SDMMCA_AUTO_CAL_STATUS_0
+SDMEMCOMP pad calibration status
+Offset: 0x1ec
+Read/Write: RO
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x00000000 (0b0xx0,0000,xxx0,0000,xxx0,0000,xxx0,0000)
+Bit
+Reset
+Description
+0x0 AUTO_CAL_ACTIVE:
+One when auto calibrate is active
+valid only after auto calibrate sequence has
+completed (AUTO_CAL_ACTIVE == 0) 28:24 0x0 AUTO_CAL_PULLDOWN_ADJ:
+Pulldown code sent to pads
+20:16 0x0 AUTO_CAL_PULLUP_ADJ:
+Pullup code sent to pads
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+12:8 0x0 AUTO_CAL_PULLDOWN:
+Pulldown code generated by auto-calibration
+4:0 0x0 AUTO_CAL_PULLUP:
+Pullup code generated by auto-calibration
+SDMMCA_IO_SPARE_0
+SPARE bits provied to use in eco process. These SPARE_OUT bits go to pipe -> pad and then come back as SPARE_IN
+SPARE_OUT[3] : IO_SPARE[19] - used as MUX select which selects between one cycle delay and
+two cycle delay versions of cmd_oen to mask wdata of IB capture flop.
+0x0 : selects zero cycle delayed version
+0x1 : selects one cycle delayed version - recommended
+SPARE_OUT[2] : IO_SPARE[18] - used as active low enable for gating both CMD_IN and DAT_IN
+aysnc FIFOs wdata when we are driving CMD/DAT lines.
+0x0 : write 1 when OEN is active and Zi value when OEN is not active into FIFO (default)
+0x1 : write Zi value into FIFO irrespective of OEN state.
+Offset: 0x1f0
+Read/Write: See table below
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0x0008XXXX (0b0000,0000,0000,1000,xxxx,xxxx,xxxx,xxxx)
+Bit
+R/W
+Reset
+Description
+31:16
+RW
+0x8
+SPARE_OUT
+15:0
+RO
+X
+SPARE_IN
+SDMMCA_CIF2AXI_CTRL_0
+SDMMC CIF2AXI control register
+DMA transaction (MC transaction) attributes
+Offset: 0x1fc
+Read/Write: R/W
+```
+
+
+- SDMMCA Registers
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,0000,0000,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+15:8 0x0 MC_WRITE_REQ_STREAM_ID:
+MC write transaction stream ID
+7:0 0x0 MC_READ_REQ_STREAM_ID:
+MC read transaction stream ID
+SDMMCA_TZ_DMA_CTRL_0
+SDMMC DMA requests security attribute control register for DMA transaction (MC transaction) security attributes. This register is used to control write/read access to secure memory region. This register can be accessed only by TZ. Non-secure writes to this register are dropped by controller and reads return all ones. Controller will assert PSLVERR when this register is accessed by a non-secure master. Usage: wsb_ns = AWPROT[1] = ~{SDMMCxx_TZ_DMA_CTRL_MC_WRITE_REQ_TZ_ACCESS_EN}; rsb_ns = ARPROT[1] = ~{SDMMCxx_TZ_DMA_CTRL_MC_READ_REQ_TZ_ACCESS_EN};
+Offset: 0x200
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+Secure: Trust Zone Protected
+SCR Protection: 0
+Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xxxx,xx00)
+Bit
+Reset
+Description
+0x0 MC_WRITE_REQ_TZ_ACCESS_EN:
+TZ must set this bit to 1 to enable write access to secure memory
+region. TZ must clear this bit to disable write access to secure memory region. 0x0 MC_READ_REQ_TZ_ACCESS_EN: TZ must set this bit to 1 to enable read access to secure memory region. TZ must clear this bit to disable read access to secure memory region.
+SDMMCA_VENDOR_MISC_CNTRL3_0
+Offset: 0x204
+```
+
+
+- SDMMCA Registers
+- Read/Write: R/W
+- Parity Protection: N
+- Shadow: N
+- SCR Protection: 0
+- Reset: 0x4f01000f (0b0100,1111,xxxx,xxx1,0000,0000,xxx0,1111)
+```
+Bit    Reset    Description
+----   -----    -----------
+0x0 ALLOW_INTRABLOCK_CLK_STALLING_IN_SDR50:
+This disables the intrablock clock stopping in SDR50 mode
+0x1 STOP_TRIM_IN_CLK_DURING_TUNING:
+When set to 1, rx clk trimmer and rx fifos input clock is stopped when
+tap value is changed during tuning process.
+When set to 0, rx clk trimmer and rx fifos input clock is not stopped
+during tap value change. Trimmer output is also clamped to zero during tuning tap val change. 29:24 0xf TUNING_TRIMMER_RECOVERY_TIME:
+Trimmer output may glitch for 2 or 3 cycles, when tap value is changed
+irrespective of its input clock state. We should not use trimmer output during this uncertainity window.
+If STOP_TRIM_IN_CLK_DURING_TUNING is set to 1,
+trimmer input clock is stopped for
+TUNING_TRIMMER_RECOVERY_TIME cycles and
+rx fifos input clock is stopped (trimmer output clock is clamped) for
+TUNING_TRIMMER_RECOVERY_TIME cycles.
+This is required not to propagate glitch into FIFOs and other
+downstream logic. 0x1 EXTEND_SYNC_INTR_MASK_DURING_ABORT_OR_STOP_CMD:
+When an async abort is issued during read operation, dat_fsm will move
+to idle state as soon as CMD12/CMD52 END bit is sent by core.
+This would start sync_intr_period. But due to the intermediate delay
+stages present in pipemacro and padmacro, END bit reaches device after some cycles. So, device would not stop data transmission till it sees END bit of ABORT CMD.
+During this time, core controller receives the data already driven by the
+device.
+If DAT[1] line has any zeroes during this period, SDIO sync interrupt
+detector will generate a spurious card interrupt.
+This register bit is used to mask sync intr detection period to avoid
+spurious interrupts. SW should not write into this field unless it is published in TRM/IAS. 15:8 0x0 E_DIFF_DQ: diff/Vref rx selection for DAT[7:0]
+If set to 1, enables differential amplitude receiver for DAT lines in EMMC
+IOBRICK. If set to 0, enables vref receiver for DAT lines in EMMC IOBRICK. (default) 0x0 E_DIFF_CMD: diff/Vref rx selection for CMD
+If set to 1, enables differential amplitude receiver for CMD in EMMC
+IOBRICK.
+If set to 0, enables vref receiver for CMD in EMMC IOBRICK. (default)
+0x1 DAT_OE_POSTAMBLE_EN:
+If set,DAT pads output driver will be disabled one cycle after END bit of
+DATA pkt sent.
+If cleared, DAT pads output driver will be disabled in the same cycle END
+bit is sent.
+```
+
+
+- SDMMCA Registers
+```
+Bit    Reset    Description
+----   -----    -----------
+0x1 DAT_OE_PREAMBLE_EN:
+If set,DAT pads output driver will be enabled one cycle before START bit
+of DATA pkt is transmitted on DAT lines.
+If cleared, DAT pads output driver will be enabled in the same cycle
+START bit is sent. 0x1 CMD_OE_POSTAMBLE_EN:
+If set,CMD pad output driver will be disabled one cycle after END bit of
+CMD pkt sent.
+If cleared, CMD pad output driver will be disabled in the same cycle END
+bit is sent. 0x1 CMD_OE_PREAMBLE_EN:
+If set,CMD pad output driver will be enabled one cycle before START bit
+of CMD pkt is transmitted on DAT lines.
+If cleared, CMD pad output driver will be enabled in the same cycle
+START bit is sent.
+SDMMCA_VENDOR_MISC_CNTRL4_0
+SPARE register1
+Offset: 0x20c
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+SCR Protection: 0
+Reset: 0xffff0000 (0b1111,1111,1111,1111,0000,0000,0000,0000)
+Bit
+Reset
+Description
+31:16 0xffff SDMMC_SPARE3:
+Spare register bits with reset value of 1
+15:0 0x0 SDMMC_SPARE2:
+Spare register bits with reset value of 0
+SDMMCA_SDMEMCOMPPADCTRL_MISC_CTL_0
+SDMEMCOMP Pad misc control register
+This register is used to control COMP pad inputs.
+Offset: 0x214
+Read/Write: R/W
+Parity Protection: N
+Shadow: N
+```
+
+
+- I2C Controller (I2C)
+- SCR Protection: 0
+- Reset: 0x00000000 (0bxxxx,xxxx,xxxx,xxxx,xxxx,xxxx,0000,0000)
+```
+Bit    Reset    Description
+----   -----    -----------
+7:4 0x0 COMP_PAD_SPARE_VDD:
+Comp pad spare inputs
+3:0 0x0 COMP_PAD_SPARE_VAUXC:
+Comp pad spare inputs
+```
+

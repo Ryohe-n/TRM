@@ -1,0 +1,14 @@
+﻿# 2. Memory Architecture and Memory Mapped I/O
+
+## 2.5 ms and the minimum width that can be programmed in the GPIO filter is 1 ms. If the duty cycle
+
+- Fan Tachometer
+goes below 50%, the glitch filter might filter out the entire pulse and so the glitch filter has to be disabled. A basic RPM calculation is as follows: for a two-pulse per revolution (PPR) fan (WIN_LENGTH=1), if the fan returns 60 pulses per second, then it is 30 (60/2) revolutions per second, which is 1800 (30*60) RPM. To capture the time period of the tachometer input for the duration of one window length: In this case, the tachometer counter clock should be programmed to 1 MHz. The figure below shows the RPM calculation in detail.
+**Figure 10.164 Tachometer Counter**
+The window length is the number of tachometer input periods that are to be monitored. This is programmed by software using the WINDOW_LENGTH field of the TACH_FAN_TACH0 register. As shown in the above figure, the counter starts incrementing on the first rising edge on every window length and resets to 1 at the beginning of each window length. At the end of each window length, the period value is latched into PERIOD [18:0] field of TACH_FAN_TACH0 register. Software periodically reads these registers for RPM calculation. The reason for having WINDOW_LENGTH is that some FANs provide more than one pulse (2/4/8) for a single rotation. To reduce the overhead in software for these calculations, window length can be modified so that the value read from PERIOD is always the time taken for one rotation, making it easier for RPM calculations. When the fan stops spinning, the rising edge of tachometer input cannot be seen, and the window length never ends. The period value reaches its maximum value. The overflow bit of the TACH_FAN_TACH0 register is set to “Detected” until software clears it. Tachometer monitoring is disabled until the next rising edge of the tachometer is detected.
+
+- Fan Tachometer
+To start counting, a pulse is generated indicating the detection of the 1st positive edge on the tachometer input. This pulse triggers the counter to start (starting from 0) and latches the period value when the next edge is detected. Since a 1 MHz clock is used to generate the trigger, the positive edge detection and triggering of counter takes one clock (one unit time), and the counter is run for N-1 unit time (N being the total time period of the pulse). So the counter reports N-1 value instead of N.
+- Change of the WIN_LENGTH field takes effect only when the current period calculation is
+complete. For example, if the current calculation counts four pulses (WIN_LEN = 2) and software programs this field to start counting one pulse (WIN_LEN = 0), the design completes the current PERIOD calculation based on WIN_LEN = 2 and then (for next PERIOD calculation) starts using WIN_LEN = 0.
+**Figure 10.165 Overflow Scenario**
